@@ -49,7 +49,28 @@ git clone <this repo> && cd planto3d
 
 Open the page. It checks Blender, the PDF tools, the viewer library and the materials, and accepts a plan only when all four are in place. The textures and models (about 60 MB, CC0, from [Poly Haven](https://polyhaven.com)) are not in the repository: press **Download materials** on the page, or run `python3 fetch_assets.py`.
 
-Then drop `examples/sample_plan.pdf` on the page.
+Then press **Try the sample plan**, or drop your own PDF on the page.
+
+### macOS
+
+```bash
+brew install python node poppler
+brew install --cask blender
+export BLENDER=/Applications/Blender.app/Contents/MacOS/Blender     # Blender is not on PATH on a Mac
+./run.sh
+```
+
+### Windows
+
+Install [Python](https://www.python.org/downloads/), [Node.js](https://nodejs.org), [Blender](https://www.blender.org/download/) and poppler (`winget install oschwartz10612.Poppler`, or `choco install poppler`), then in PowerShell:
+
+```powershell
+npm install
+$env:BLENDER = "C:\Program Files\Blender Foundation\Blender 4.5\blender.exe"    # your Blender version's folder
+python server.py
+```
+
+`pdftocairo` must be found on `PATH`; the home page tells you if it, or Blender, is missing. The project was developed and tested on Linux; the macOS and Windows steps have not been run.
 
 ```bash
 ./run.sh --port 9000 --host 0.0.0.0     # reachable from other devices
@@ -71,6 +92,12 @@ Then drop `examples/sample_plan.pdf` on the page.
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
 | **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |
+
+### Your own furniture
+
+| Furniture models page | A replaced sofa in a built house |
+|---|---|
+| ![Furniture page](docs/furniture.png) | ![Custom sofa](docs/custom_sofa.png) |
 
 ## Build time and accuracy
 
