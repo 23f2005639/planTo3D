@@ -177,6 +177,7 @@ web/               home, review and walkthrough pages
 examples/          sample_plan.pdf, its generator, embed.html
 tests/             detector, furniture, walking and browser tests
 tools/             video and debugging helpers
+AGENTS.md          guide for AI coding agents working on this project
 jobs/              one folder per uploaded plan (not in git)
 assets/            downloaded materials (not in git)
 ```
