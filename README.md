@@ -67,7 +67,9 @@ Then drop `examples/sample_plan.pdf` on the page.
 | **Top view** (T) | The house from above, one storey at a time |
 | **Map** (M) | Room names, stairs, where you stand and look |
 | **Screenshot** (P) | PNG of about 4K size |
-| **Record** (R) | Video of your walk, MP4 or WebM |
+| **Record** (R) | Video of your walk as MP4 (browsers that record WebM are converted on the server; needs ffmpeg) |
+| **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
+| **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |
 
 ## Build time and accuracy
@@ -129,6 +131,8 @@ sequenceDiagram
 | `GET /web/view.html?job={id}` | The walkthrough. `&embed` hides the link back to the upload page |
 | `GET /web/edit.html?job={id}` | The review page |
 | `GET /api/jobs` | The 30 most recent plans |
+| `DELETE /api/jobs/{id}` | Delete a plan and its house |
+| `GET /api/furniture` | Replaceable items; `POST /api/furniture/{name}` (a `.glb`) replaces one, `DELETE` restores it |
 
 To let people correct the plan first, show `/web/edit.html?job={id}` in the iframe instead of building straight away.
 
@@ -139,6 +143,7 @@ server.py          web server and build queue (standard library only)
 detect.py          plan PDF -> plan JSON
 vector.py          PDF lines, curves, fills and words (poppler)
 furnish.py         furniture rules (pure Python)
+catalog.py         furniture that can be replaced by your own models
 fetch_assets.py    downloads the CC0 textures, models and sky
 blender/           gen.py (build), bake.py (light maps), lib.py (parts), cinema.py (video renderer)
 web/               home, review and walkthrough pages
@@ -171,7 +176,7 @@ CHROME=/path/to/chromium node tests/test_site.mjs examples/sample_plan.pdf http:
 - **Labels in English**, sizes in feet and inches. Without size labels the scale is a guess and must be set on the review page.
 - **Wall groups.** If the drawing's walls fall into groups whose outlines do not overlap, the detector reads them as separate plans and can drop a part of the house.
 - **No login.** Anyone who can reach the server can upload, build and read every plan. Keep it on a trusted network or behind your own backend. `--cors *` lets any website call it from the visitor's browser: name your origin instead.
-- **Disk.** Plans are never deleted; a built house takes about 10 to 70 MB in `jobs/`.
+- **Disk.** Plans stay until you delete them; a built house takes about 10 to 70 MB in `jobs/`.
 
 ## Credits
 

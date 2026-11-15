@@ -20,6 +20,7 @@
     <span>or click to choose · CAD-exported PDF</span>
   </label>
   <p id="msg" role="status"></p>
+  <p class="links"><button class="more" id="sample">Try the sample plan</button> · <a href="/web/furniture.html">Furniture models</a></p>
 
   <p class="steps" id="steps">Detect → Review → Build → Walk</p>
   <section class="setup" id="setup" hidden>
@@ -57,6 +58,10 @@ async function upload(f) {
   }
 }
 $('file').onchange = (e) => upload(e.target.files[0]);
+$('sample').onclick = async () => {       // the made-up drawing that ships with the project
+  const pdf = await fetch('/examples/sample_plan.pdf').then((r) => r.blob());
+  upload(new File([pdf], 'sample_plan.pdf', { type: 'application/pdf' }));
+};
 ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', (e) => upload(e.dataTransfer.files[0]));
@@ -140,6 +145,13 @@ fetch('/api/jobs').then((r) => r.json()).then((jobs) => {
     const [label, cls] = STAGE[j.stage] || [j.stage, ''];
     row.append(a, el('span', `chip ${cls}`, label));
     if (done) { const e = el('a', 'edit', 'Edit'); e.href = `/web/edit.html?job=${j.id}`; row.append(e); }
+    const del = el('button', 'more del', 'Delete');
+    del.onclick = async () => {
+      if (!confirm(`Delete "${j.name || j.id}" and its 3D house? This cannot be undone.`)) return;
+      const r = await fetch(`/api/jobs/${j.id}`, { method: 'DELETE' });
+      if (r.ok) row.remove(); else alert((await r.json()).error);
+    };
+    row.append(del);
     $('jobs').append(row);
   }
   if (jobs.length > 5) {

@@ -15,6 +15,8 @@ import bpy  # noqa: E402
 from lib import *  # noqa: E402,F401
 import lib  # noqa: E402
 import furnish  # noqa: E402
+from catalog import CATALOG  # noqa: E402
+from mathutils import Vector  # noqa: E402
 
 
 def progress(p, msg):
@@ -283,6 +285,39 @@ def model(name, x, y, rot=0, z=0.0, scale=1.0):
     place(name, x, y, rot, z=z, scale=scale, collide=False)
 
 
+def custom(it):
+    """the person's own model (assets/custom/<fn>.glb) in place of a built-in item, fitted to the item's footprint"""
+    path = os.path.join(ASSETS, "custom", it["fn"] + ".glb")
+    x0, x1, y0, y1 = it.get("box") or (0, 0, 0, 0)
+    if it["fn"] not in CATALOG or not os.path.exists(path) or x1 - x0 < 0.1 or y1 - y0 < 0.1:
+        return False
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=path)        # shortcut: imported once per item, fine for a house; cache if plans grow huge
+    new = [o for o in bpy.data.objects if o not in before]
+    bpy.context.view_layer.update()
+    pts = [o.matrix_world @ Vector(c) for o in new if o.type == "MESH" for c in o.bound_box]
+    if not pts:
+        return False
+    lo = Vector([min(p[i] for p in pts) for i in range(3)])
+    hi = Vector([max(p[i] for p in pts) for i in range(3)])
+    rot = it["args"][2]
+    bw, bd = ((y1 - y0), (x1 - x0)) if round(rot) % 180 == 90 else ((x1 - x0), (y1 - y0))
+    s = min(bw * lib.F / max(hi.x - lo.x, 1e-6), bd * lib.F / max(hi.y - lo.y, 1e-6))
+    root = bpy.data.objects.new(f"custom_{it['fn']}", None)
+    collection("furniture").objects.link(root)
+    for o in new:
+        for c in list(o.users_collection):
+            c.objects.unlink(o)
+        collection("furniture").objects.link(o)
+        if o.parent is None:
+            o.location -= Vector(((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, lo.z))     # centred, standing on the floor
+            o.parent = root
+    root.scale = (s, s, s)
+    root.rotation_euler = (0, 0, math.radians(rot))
+    root.location = ((x0 + x1) / 2 * lib.F, (y0 + y1) / 2 * lib.F, lib.LEVEL * lib.F)
+    return True
+
+
 CALLS = dict(bathtub=bathtub, round_rug=round_rug, model=model, bed=bed, nightstand=nightstand, wardrobe=wardrobe, desk=desk, wc2=wc2, vanity=vanity,
              shower2=lambda x, y, rot: shower2(x, y, rot), geyser=lambda x, y, rot: geyser(x, y, rot),
              kitchen_run=kitchen_run, chimney=chimney, wall_cab2=wall_cab2, fridge2=fridge2, washer2=washer2,
@@ -421,7 +456,7 @@ for k, f in enumerate(floors):
     items = [] if plan.get("furnish") is False else f.get("items") or furnish.furnish_floor(f)
     for it in items:
         try:
-            CALLS[it["fn"]](*it["args"], **it["kw"])
+            custom(it) or CALLS[it["fn"]](*it["args"], **it["kw"])
         except Exception as e:     # one bad item must not stop the build
             print("ITEM FAILED", it["fn"], e, flush=True)
     # lamps (emissive panel + area light for the bake) in roofed rooms

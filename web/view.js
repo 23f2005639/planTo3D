@@ -283,7 +283,12 @@ function toggleRec() {
     rec = null;
     $('rec').textContent = 'Record';
     $('rec').classList.remove('live');
-    save(new Blob(chunks, { type: REC_TYPE }), REC_TYPE.includes('mp4') ? 'mp4' : 'webm');
+    const blob = new Blob(chunks, { type: REC_TYPE });
+    if (REC_TYPE.includes('mp4')) return save(blob, 'mp4');
+    $('rec').textContent = 'Converting…';      // this browser records WebM: the server turns it into MP4
+    fetch('/api/mp4', { method: 'POST', body: blob }).then((r) => (r.ok ? r.blob() : Promise.reject()))
+      .then((mp4) => save(mp4, 'mp4'), () => save(blob, 'webm'))        // (no ffmpeg on the server: keep the WebM)
+      .finally(() => { $('rec').textContent = 'Record'; });
   };
   rec.start(1000);
   $('rec').classList.add('live');

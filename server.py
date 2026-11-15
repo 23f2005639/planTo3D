@@ -12,11 +12,11 @@ JOBS = os.path.join(HERE, "jobs")
 WEB = os.path.join(HERE, "web")
 THREE = os.path.join(HERE, "node_modules", "three")
 BLENDER = shutil.which("blender") or "blender"
-MAX_UPLOAD = 60 * 1024 * 1024
+MAX_UPLOAD = 200 * 1024 * 1024       # plans are small; recordings sent for MP4 conversion are not
 BUILD_TIMEOUT = 2 * 3600        # seconds; a high-quality build of a large house takes well under an hour
 ID = re.compile(r"^[a-f0-9]{12}$")
 sys.path.insert(0, HERE)
-import detect, fetch_assets, vector  # noqa: E402
+import catalog, detect, fetch_assets, vector  # noqa: E402
 
 os.makedirs(JOBS, exist_ok=True)
 builds = queue.Queue()
@@ -103,6 +103,49 @@ def export_blend(jid):
             os.remove(tmp)
             os.replace(out + ".part", out)
     return f"/jobs/{jid}/house_blender.zip"
+
+
+# ------------------------------------------------------------------ your own furniture models
+CUSTOM, THUMBS = os.path.join(fetch_assets.ROOT, "custom"), os.path.join(fetch_assets.ROOT, "thumbs")
+thumbs_job = dict(running=False, again=False)
+
+
+def render_thumbs():
+    """pictures of every replaceable item as it will be built now (built-in or your model): a small house with all of
+    them in a row is built without baking, then photographed. Runs again if a model changed meanwhile."""
+    try:
+        while True:
+            thumbs_job["again"] = False
+            os.makedirs(THUMBS, exist_ok=True)
+            with open(os.path.join(THUMBS, "plan.json"), "w") as fh:
+                json.dump(catalog.preview_plan(), fh)
+            subprocess.run([BLENDER, "-b", "--factory-startup", "-P", os.path.join(HERE, "blender", "gen.py"), "--",
+                            os.path.join(THUMBS, "plan.json"), THUMBS, "--no-bake"], capture_output=True, timeout=1800)
+            subprocess.run([BLENDER, "-b", os.path.join(THUMBS, "house.blend"), "-P", os.path.join(HERE, "blender", "thumbs.py"),
+                            "--", THUMBS], capture_output=True, timeout=600)
+            if not thumbs_job["again"]:
+                break
+    except Exception:
+        traceback.print_exc()
+    finally:
+        thumbs_job["running"] = False
+
+
+def refresh_thumbs():
+    with lock:
+        if thumbs_job["running"]:
+            thumbs_job["again"] = True
+            return
+        thumbs_job["running"] = True
+    threading.Thread(target=render_thumbs, daemon=True).start()
+
+
+def furniture():
+    if not thumbs_job["running"] and not all(os.path.exists(os.path.join(THUMBS, f"{fn}.png")) for fn in catalog.CATALOG):
+        refresh_thumbs()
+    return dict(rendering=thumbs_job["running"], items=[
+        dict(fn=fn, label=label, custom=os.path.exists(os.path.join(CUSTOM, f"{fn}.glb")),
+             thumb=os.path.exists(os.path.join(THUMBS, f"{fn}.png"))) for fn, (label, *_) in catalog.CATALOG.items()])
 
 
 # ------------------------------------------------------------------ pipeline steps
@@ -203,6 +246,7 @@ class H(BaseHTTPRequestHandler):
         if CORS:
             self.send_header("Access-Control-Allow-Origin", CORS)
             self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Filename")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE")
 
     def do_OPTIONS(self):               # the browser's question before a cross-site POST
         self.send_response(204)
@@ -220,7 +264,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", TYPES.get(ext, "application/octet-stream"))
         self.send_header("Content-Length", str(size))
         # job outputs change on every rebuild: never let the browser show a stale house
-        fresh = ext in (".json", ".html", ".js", ".css") or "/jobs/" in path.replace(os.sep, "/")
+        fresh = ext in (".json", ".html", ".js", ".css", ".png") or "/jobs/" in path.replace(os.sep, "/")
         self.send_header("Cache-Control", "no-cache" if fresh else "max-age=3600")
         self.cors()
         self.end_headers()
@@ -234,6 +278,12 @@ class H(BaseHTTPRequestHandler):
             return self.file(os.path.join(WEB, "index.html"), WEB)
         if p.startswith("/web/"):
             return self.file(os.path.join(WEB, p[5:]), WEB)
+        if p.startswith("/examples/"):
+            return self.file(os.path.join(HERE, "examples", p[10:]), os.path.join(HERE, "examples"))
+        if p.startswith("/thumbs/"):
+            return self.file(os.path.join(THUMBS, p[8:]), THUMBS)
+        if p == "/api/furniture":
+            return self.send(200, furniture())
         if p.startswith("/three/"):
             return self.file(os.path.join(THREE, p[7:]), THREE)
         if p.startswith("/jobs/"):
@@ -262,12 +312,50 @@ class H(BaseHTTPRequestHandler):
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
         if not 0 <= n <= MAX_UPLOAD:
-            raise ValueError("file too large (60 MB max)")
+            raise ValueError("file too large (200 MB max)")
         return self.rfile.read(n)
+
+    def do_DELETE(self):
+        p = urlparse(self.path).path
+        m = re.match(r"^/api/jobs/([a-f0-9]{12})$", p)
+        if m and os.path.isdir(jdir(m.group(1))):
+            if (read_status(m.group(1)) or {}).get("stage") in ("building", "queued"):
+                return self.send(409, {"error": "This plan is being built. Delete it when the build has finished."})
+            shutil.rmtree(jdir(m.group(1)))
+            return self.send(200, {"ok": True})
+        m = re.match(r"^/api/furniture/(\w+)$", p)
+        if m and m.group(1) in catalog.CATALOG:               # back to the built-in item
+            for f in (os.path.join(CUSTOM, m.group(1) + ".glb"), os.path.join(THUMBS, m.group(1) + ".png")):
+                if os.path.exists(f):
+                    os.remove(f)
+            refresh_thumbs()
+            return self.send(200, {"ok": True})
+        self.send(404, {"error": "not found"})
 
     def do_POST(self):
         p = urlparse(self.path).path
         try:
+            m = re.match(r"^/api/furniture/(\w+)$", p)
+            if m and m.group(1) in catalog.CATALOG:           # your model for this item, as a .glb file
+                data = self.body()
+                if not data.startswith(b"glTF"):
+                    return self.send(400, {"error": "Please upload a .glb file (binary glTF)."})
+                os.makedirs(CUSTOM, exist_ok=True)
+                with open(os.path.join(CUSTOM, m.group(1) + ".glb"), "wb") as fh:
+                    fh.write(data)
+                if os.path.exists(os.path.join(THUMBS, m.group(1) + ".png")):
+                    os.remove(os.path.join(THUMBS, m.group(1) + ".png"))
+                refresh_thumbs()
+                return self.send(200, {"ok": True})
+            if p == "/api/mp4":                               # a WebM recording in, the same video as MP4 out
+                if not shutil.which("ffmpeg"):
+                    return self.send(501, {"error": "ffmpeg is not installed on the server"})
+                r = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", "pipe:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+                                    "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-movflags", "frag_keyframe+empty_moov", "-f", "mp4", "pipe:1"],
+                                   input=self.body(), capture_output=True, timeout=600)
+                if r.returncode or not r.stdout:
+                    return self.send(500, {"error": "the recording could not be converted"})
+                return self.send(200, r.stdout, "video/mp4")
             if p == "/api/materials":            # start the Poly Haven download (the home page's button)
                 with lock:
                     start = not assets_job["running"]
