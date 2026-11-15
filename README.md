@@ -16,13 +16,13 @@ All screenshots show [`examples/sample_plan.pdf`](examples/sample_plan.pdf), a m
 
 ```mermaid
 flowchart LR
-    A[Plan PDF<br/>CAD export] --> B[detect.py<br/>walls, doors, windows,<br/>rooms, stairs, scale]
-    B --> C[Review page<br/>fix anything misread]
-    C --> D[furnish.py<br/>furniture by rules]
-    D --> E[Blender<br/>gen.py builds,<br/>bake.py bakes light]
-    E --> F[house.glb<br/>+ light maps]
-    F --> G[Browser<br/>walk, top view, map,<br/>record, screenshot]
-    E --> H[house.blend<br/>zip download]
+    A["Plan PDF (CAD export)"] --> B["detect.py: walls, doors, windows, rooms, stairs, scale"]
+    B --> C["Review page: fix anything misread"]
+    C --> D["furnish.py: furniture by rules"]
+    D --> E["Blender: gen.py builds, bake.py bakes light"]
+    E --> F["house.glb and light maps"]
+    F --> G["Browser: walk, top view, map, record, screenshot"]
+    E --> H["house.blend zip download"]
 ```
 
 | Step | File | Method |
@@ -126,17 +126,17 @@ The walkthrough is a page you can place in an `<iframe>`, and every step is an H
 sequenceDiagram
     participant S as Your page
     participant P as PlanTo3D server
-    S->>P: POST /api/upload (the PDF)
-    P-->>S: { id }
-    loop until stage = detected
-        S->>P: GET /api/jobs/{id}
+    S->>P: POST /api/upload with the PDF
+    P-->>S: job id
+    loop until stage is detected
+        S->>P: GET /api/jobs/ID
     end
-    S->>P: POST /api/jobs/{id}/build { quality }
-    loop until stage = done
-        S->>P: GET /api/jobs/{id}
-        P-->>S: { stage, progress, eta_left }
+    S->>P: POST /api/jobs/ID/build with quality
+    loop until stage is done
+        S->>P: GET /api/jobs/ID
+        P-->>S: stage, progress, eta_left
     end
-    S->>S: iframe src = /web/view.html?job={id}&embed
+    S->>S: show /web/view.html?job=ID&embed in an iframe
 ```
 
 ```html
