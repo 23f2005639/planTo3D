@@ -136,7 +136,7 @@ sequenceDiagram
         S->>P: GET /api/jobs/ID
         P-->>S: stage, progress, eta_left
     end
-    S->>S: show /web/view.html?job=ID&embed in an iframe
+    S->>S: show the walkthrough page in an iframe
 ```
 
 ```html
