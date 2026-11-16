@@ -62,6 +62,13 @@ try {
   await cdp('Page.navigate', { url: `${base}/web/edit.html?job=${job}` });
   for (let i = 0; i < 150 && (await ev(`getComputedStyle(document.getElementById('wait')).display`)) !== 'none'; i++) await sleep(200);
   assert.equal(await ev(`document.getElementById('furn').checked`), false, 'Furniture box should stay unticked after reload');
+  // the furniture models page opens inside the review page
+  await ev(`document.getElementById('models').click()`);
+  let cards = 0;
+  for (let i = 0; i < 50 && !cards; i++) { await sleep(200); cards = await ev(`document.getElementById('modelsframe').contentDocument?.querySelectorAll('#list figure').length || 0`); }
+  assert(cards >= 10 && await ev(`document.getElementById('modelsdlg').open`), 'Change furniture models should show the models in a dialog');
+  assert.equal(await ev(`!!document.getElementById('modelsframe').contentDocument.getElementById('brand')`), false, 'no Home link inside the dialog');
+  await ev(`document.getElementById('modelsdlg').close()`);
   // walkthrough: screenshot (P) and recording (R) land in the downloads folder
   const dl = fs.mkdtempSync(path.join(os.tmpdir(), 'planto3d-'));
   const key = async (code, vk) => { for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, code, key: code.slice(3).toLowerCase(), windowsVirtualKeyCode: vk }); };
@@ -99,7 +106,7 @@ try {
   assert(ihdr.readUInt32BE(16) * ihdr.readUInt32BE(20) >= 0.95 * 3840 * 2160, 'screenshot should be about 4K');
   assert(fs.statSync(path.join(dl, vid)).size > 100e3, 'recording should not be empty');
   fs.rmSync(dl, { recursive: true });
-  console.log('PASS upload page, furniture option, build box, screenshot, recording, map and top view');
+  console.log('PASS upload page, furniture option, furniture models dialog, build box, screenshot, recording, map and top view');
 } finally {
   ch.kill();
   if (job) fs.rmSync(new URL(`../jobs/${job}`, import.meta.url), { recursive: true, force: true });   // the test's own upload

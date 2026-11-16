@@ -8,7 +8,7 @@
 </head>
 <body class="home">
 <main class="wrap" style="max-width:960px">
-  <p class="brand"><a href="/" style="color:inherit;text-decoration:none">PlanTo3D</a> · <a href="/">Home</a></p>
+  <p class="brand" id="brand"><a href="/" style="color:inherit;text-decoration:none">PlanTo3D</a> · <a href="/">Home</a></p>
   <h1>Furniture models</h1>
   <p class="muted">Each picture shows the item as houses are built with it now. Replace any of them with your own
     <code>.glb</code> model: it is scaled to the item's footprint and stood on the floor. Model it with +Y up and its
@@ -19,6 +19,7 @@
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+if (new URLSearchParams(location.search).has('embed')) $('brand').remove();      // shown inside the review page
 const el = (tag, cls, text) => { const e = document.createElement(tag); e.className = cls; e.textContent = text; return e; };
 let target = null;
 async function load() {
