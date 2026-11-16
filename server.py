@@ -186,34 +186,76 @@ def estimate(jid, quality):
     return st["build_seconds"] * n / (len(st.get("floors") or [1]) + 1)
 
 
+def photo_estimate(jid):
+    """seconds for the realistic photos: one per room, timed on the last house that had them (40 s each until then)"""
+    rooms = sum(1 for f in (json.load(open(os.path.join(jdir(jid), "plan.json")))["floors"]) for r in f["rooms"]
+                if r["type"] in PHOTO_ROOMS)
+    past = [st for st in (read_status(j) for j in os.listdir(JOBS) if ID.match(j)) if st and st.get("photo_seconds")]
+    if not past:
+        return rooms * 40
+    st = max(past, key=lambda s: s["updated"])
+    return rooms * st["photo_seconds"] / max(1, len(st.get("photos") or []))
+
+
+PHOTO_ROOMS = {"bedroom", "living", "dining", "kitchen", "toilet", "study", "puja", "room", "dress", "balcony"}   # as in blender/photos.py
+
+
+def run_blender(cmd, log, on_line):
+    """run Blender, copy its output to log, hand every line to on_line; killed after BUILD_TIMEOUT"""
+    pr = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    watchdog = threading.Timer(BUILD_TIMEOUT, pr.kill)      # a hung Blender must not block every later build
+    watchdog.start()
+    try:
+        for line in pr.stdout:
+            log.write(line)
+            on_line(line)
+        pr.wait()
+    finally:
+        watchdog.cancel()
+
+
 def builder():
     while True:
-        jid, quality = builds.get()
+        jid, quality, photos = builds.get()
         d = jdir(jid)
         try:
             t0 = time.time()
-            status(jid, stage="building", progress=1, message="Starting Blender", started=t0, eta_total=estimate(jid, quality))
+            shutil.rmtree(os.path.join(d, "photos"), ignore_errors=True)     # photos of the old build would not match
+            share = 60 if photos else 100           # % of the progress bar for the build; the photos get the rest
+            status(jid, stage="building", progress=1, message="Starting Blender", started=t0, photos=None, want_photos=photos,
+                   eta_total=estimate(jid, quality) + (photo_estimate(jid) if photos else 0))
             cmd = [BLENDER, "-b", "--factory-startup", "-P", os.path.join(HERE, "blender", "gen.py"), "--",
                    os.path.join(d, "plan.json"), d, "--quality", quality]
+            ok = []
+
+            def gen_line(line):
+                m = re.match(r"PROGRESS (\d+) (.*)", line)
+                if m:
+                    status(jid, progress=int(m.group(1)) * share // 100, message=m.group(2).strip())
+                if line.startswith("GEN OK"):
+                    ok.append(1)
             with open(os.path.join(d, "build.log"), "w") as log:
-                pr = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                watchdog = threading.Timer(BUILD_TIMEOUT, pr.kill)      # a hung Blender must not block every later build
-                watchdog.start()
-                ok = False
-                for line in pr.stdout:
-                    log.write(line)
-                    m = re.match(r"PROGRESS (\d+) (.*)", line)
-                    if m:
-                        status(jid, progress=int(m.group(1)), message=m.group(2).strip())
-                    ok = ok or line.startswith("GEN OK")
-                pr.wait()
-                watchdog.cancel()
+                run_blender(cmd, log, gen_line)
             if not ok or not os.path.exists(os.path.join(d, "house.glb")):
                 raise RuntimeError("3D build failed - see build.log")
             for f in ("house.blend", "house.blend1", "house_baked.blend1"):      # keep house_baked.blend only
                 if os.path.exists(os.path.join(d, f)):
                     os.remove(os.path.join(d, f))
-            status(jid, stage="done", progress=100, message="Ready", quality=quality, build_seconds=round(time.time() - t0))
+            done = dict(quality=quality, build_seconds=round(time.time() - t0))
+            if photos:
+                t1, names = time.time(), []
+
+                def photo_line(line):
+                    m = re.match(r"PROGRESS (\d+) (.*)", line)
+                    if m:
+                        status(jid, progress=share + int(m.group(1)) * (100 - share) // 100, message=m.group(2).strip())
+                    if line.startswith("PHOTO "):
+                        names.append(line.split()[1])
+                with open(os.path.join(d, "photos.log"), "w") as log:      # a failed photo still leaves a usable house
+                    run_blender([BLENDER, "-b", os.path.join(d, "house_baked.blend"), "-P",
+                                 os.path.join(HERE, "blender", "photos.py"), "--", d], log, photo_line)
+                done.update(photos=names, photo_seconds=round(time.time() - t1))
+            status(jid, stage="done", progress=100, message="Ready", **done)
         except Exception as e:
             traceback.print_exc()
             status(jid, stage="failed", message=str(e))
@@ -296,7 +338,7 @@ class H(BaseHTTPRequestHandler):
             st = read_status(m.group(1))
             if st and st.get("stage") == "building" and st.get("started"):      # counted here: the viewer's clock may differ
                 left = st["started"] + st["eta_total"] - time.time()
-                st["eta_left"] = max(0, round(min(left, 15) if st.get("progress", 0) >= 92 else left))   # 92 = exporting, the last step
+                st["eta_left"] = max(0, round(min(left, 15) if st.get("message") == "exporting model" and not st.get("want_photos") else left))   # the build's last step
             return self.send(200 if st else 404, st or {"error": "no such job"})
         if p == "/api/system":
             return self.send(200, system())
@@ -394,10 +436,10 @@ class H(BaseHTTPRequestHandler):
                     with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
                         json.dump(plan, fh)
                     return self.send(200, {"ok": True})
-                q = json.loads(self.body() or b"{}").get("quality", "high")
-                q = q if q in ("draft", "high") else "high"
+                req = json.loads(self.body() or b"{}")
+                q = req.get("quality") if req.get("quality") in ("draft", "high") else "high"
                 status(jid, stage="queued", progress=0, message=f"Waiting for the 3D builder ({builds.qsize()} ahead)")
-                builds.put((jid, q))
+                builds.put((jid, q, req.get("photos") is True))
                 return self.send(200, {"ok": True})
             self.send(404, {"error": "not found"})
         except (ValueError, json.JSONDecodeError) as e:
