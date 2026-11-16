@@ -24,13 +24,6 @@
   #bar button.live { background: #b3261e; border-color: #b3261e; color: #fff; }
   #fps { color: #bbb; font-size: 12px; margin-left: auto; background: rgba(0,0,0,.4); padding: 4px 8px; border-radius: 6px; }
   #floors { display: contents; }
-  #gallery { position: fixed; inset: 0; z-index: 20; background: rgba(12,13,15,.94); overflow: auto; padding: 56px 16px 24px; }
-  #gallery[hidden] { display: none; }
-  #gallery .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; max-width: 1500px; margin: auto; }
-  #gallery figure { margin: 0; color: #ddd; font-size: 13px; }
-  #gallery img { width: 100%; border-radius: 8px; display: block; }
-  #gallery figcaption { margin-top: 5px; text-transform: capitalize; }
-  #gallery button { position: fixed; top: 12px; right: 16px; background: #e8e1d3; color: #111; border: 0; border-radius: 6px; padding: 7px 12px; font-size: 13px; }
   #map { position: fixed; right: 12px; bottom: 58px; width: 220px; height: 220px; border-radius: 12px; cursor: pointer;
          background: rgba(14, 16, 20, .78); border: 1px solid rgba(255, 255, 255, .18); }
   #map.big { right: 50%; bottom: 50%; transform: translate(50%, 50%); width: min(88vw, 88vh, 900px); height: min(88vw, 88vh, 900px);
@@ -53,10 +46,9 @@
   <p class="desk"><kbd>P</kbd> screenshot · <kbd>R</kbd> start / stop recording · <kbd>M</kbd> map</p>
   <p class="touch">Left thumb: move · right thumb: look</p>
 </div>
-<div id="gallery" hidden><button id="closephotos">Close</button><div class="grid" id="photogrid"></div></div>
 <div id="room"></div>
 <div id="cross"></div>
-<div id="bar"><button id="topbtn">Top view</button><span id="floors"></span><button id="shot" title="Save a picture of this view (P)">Screenshot</button><button id="rec" title="Record a video of your walk (R)">Record</button><button id="blend" title="Download this house as a Blender file (.zip)">Blender file</button><button id="photosbtn" hidden title="Realistic photos of each room, rendered with Blender's Cycles engine">Photos</button><a href="/" id="newplan" style="color:#ccc;font-size:13px">Home</a><span id="fps"></span></div>
+<div id="bar"><button id="topbtn">Top view</button><span id="floors"></span><button id="shot" title="Save a picture of this view (P)">Screenshot</button><button id="rec" title="Record a video of your walk (R)">Record</button><button id="blend" title="Download this house as a Blender file (.zip)">Blender file</button><a href="/" id="newplan" style="color:#ccc;font-size:13px">Home</a><span id="fps"></span></div>
 <script type="module" src="/web/view.js"></script>
 </body>
 </html>

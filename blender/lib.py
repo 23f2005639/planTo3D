@@ -35,6 +35,8 @@ def tex_node(nt, path, non_color=False):
 
 def _grey(img):
     """the photo's weave and shading without its colour (mean brightness 0.8), so a tint can set any colour"""
+    if img.name + "_grey" in bpy.data.images:       # one copy per photo, however many colours use it
+        return bpy.data.images[img.name + "_grey"]
     w, h = img.size
     px = np.empty(w * h * 4, np.float32)
     img.pixels.foreach_get(px)

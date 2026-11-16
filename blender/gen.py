@@ -134,14 +134,20 @@ def curtains(f, items):
             bottom = sill - 0.3 if blocked else 0.1
             rod = min(head + 0.6, lib.WALL_H - 0.3)
             c = (a0 + a1) / 2
+            # past the window edge by 0.6 ft, unless a door or another window is right there
+            line = lambda q: (q["rect"][2] + q["rect"][3]) / 2 if along_x else (q["rect"][0] + q["rect"][1]) / 2
+            near = [(q["rect"][0], q["rect"][1]) if along_x else (q["rect"][2], q["rect"][3]) for q in f["openings"]
+                    if q is not o and q["axis"] == o["axis"] and abs(line(q) - line(o)) < 0.3]     # same wall
+            ext = [0.05 if any(a0 - 0.8 <= e <= a0 + 0.01 for _, e in near) else 0.6,
+                   0.05 if any(a1 - 0.01 <= e <= a1 + 0.8 for e, _ in near) else 0.6]
             r = item("curtain", c if along_x else plane, plane if along_x else c, 0 if along_x else 90)
-            span = a1 - a0 + 1.4
-            p_cyl(r, "curtain_rod", 0.05, 0.05, span, "brass", (-span / 2, 0, rod), rot=(0, 90, 0), segs=12)
-            for s_ in (-1, 1):
-                p_cyl(r, "rod_end", 0.1, 0.1, 0.12, "brass", (s_ * span / 2, 0, rod), rot=(0, 90, 0), segs=12)
+            lo, hi = a0 - ext[0] - c, a1 + ext[1] - c           # rod ends, local x
+            p_cyl(r, "curtain_rod", 0.05, 0.05, hi - lo + 0.2, "brass", (lo - 0.1, 0, rod), rot=(0, 90, 0), segs=12)
+            for e in (lo - 0.1, hi + 0.1):
+                p_cyl(r, "rod_end", 0.1, 0.1, 0.12, "brass", (e - 0.06, 0, rod), rot=(0, 90, 0), segs=12)
             pw = max(1.3, (a1 - a0) * 0.3)
-            for s_ in (-1, 1):
-                p_pleats(r, "curtain", pw, rod - bottom, "curtain", (s_ * ((a1 - a0) / 2 + 0.6 - pw / 2), 0, bottom))
+            for e, s_ in ((lo, 1), (hi, -1)):                 # each panel gathered at one end of the rod
+                p_pleats(r, "curtain", pw, rod - bottom, "curtain", (e + s_ * pw / 2, 0, bottom))
             done(r, collide=False)
 
 

@@ -72,13 +72,11 @@ function buildStatus(st) {
   const left = st.stage === 'building' ? st.eta_left : null;      // seconds, estimated from earlier builds on this machine
   $('beta').textContent = left == null ? '' : left > 8 ? `about ${secs(left >= 90 ? left : Math.ceil(left / 5) * 5)} left` : 'almost done';
   const took = st.stage === 'done' && st.build_seconds ? `built in ${secs(st.build_seconds)}` : '';
-  const step = st.stage === 'building' && !/cooling|photographing/.test(st.message) ? '' : st.message;     // Blender's step names stay out of sight
+  const step = st.stage === 'building' && !/cooling/.test(st.message) ? '' : st.message;     // Blender's step names stay out of sight
   $('bmsg').textContent = st.stage === 'failed' ? `Failed: ${st.message}` : [step, took].filter(Boolean).join(' · ');
   $('bmsg').className = st.stage === 'failed' ? 'err' : 'muted';
   $('open').hidden = st.stage !== 'done';
   $('open').href = `/web/view.html?job=${job}`;
-  $('openphotos').hidden = !(st.stage === 'done' && st.photos?.length);
-  $('openphotos').href = `/web/view.html?job=${job}&photos`;
   $('build').disabled = ['queued', 'building'].includes(st.stage);
   if (['queued', 'building'].includes(st.stage)) setTimeout(() => fetch(`/api/jobs/${job}`).then((r) => r.json()).then(buildStatus), 1500);
 }
@@ -324,7 +322,7 @@ $('build').onclick = async () => {
   $('build').disabled = true;
   plan.furnish = $('furn').checked;
   let r = await fetch(`/api/jobs/${job}/plan`, { method: 'POST', body: JSON.stringify(plan) });
-  if (r.ok) r = await fetch(`/api/jobs/${job}/build`, { method: 'POST', body: JSON.stringify({ quality: $('quality').value, photos: $('photos').checked }) });
+  if (r.ok) r = await fetch(`/api/jobs/${job}/build`, { method: 'POST', body: JSON.stringify({ quality: $('quality').value}) });
   const j = await r.json();
   if (!r.ok) { alert(j.error); $('build').disabled = false; return; }
   buildStatus({ stage: 'queued', progress: 0, message: 'Queued' });

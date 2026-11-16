@@ -7,8 +7,13 @@ from catalog import CATALOG, CELL  # noqa: E402
 
 out, F = sys.argv[sys.argv.index("--") + 1], 0.3048
 sc = bpy.context.scene
-eng = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
-sc.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in eng else "BLENDER_EEVEE"   # real materials, quick
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bake  # noqa: E402
+bake._gpu(sc)          # Cycles: real materials, and unlike EEVEE it runs on a server with no display or GPU
+sc.cycles.samples, sc.cycles.use_denoising = 32, True
+for o in sc.objects:                # roof off: the sky lights the preview room evenly, as in a photo studio
+    if o.name.startswith(("roof", "parapet")):
+        o.hide_render = True
 sc.render.resolution_x, sc.render.resolution_y = 480, 360
 cam = bpy.data.objects.new("thumb", bpy.data.cameras.new("thumb"))
 sc.collection.objects.link(cam)

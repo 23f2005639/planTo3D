@@ -294,27 +294,6 @@ function toggleRec() {
   $('rec').classList.add('live');
   label();
 }
-// realistic photos (Cycles), when the house was built with them: a gallery over the walkthrough
-fetch(`/api/jobs/${job}`).then((r) => r.json()).then((st) => {
-  const names = (st.photos || []).filter((n) => /^[\w.-]+\.jpg$/.test(n));
-  if (!names.length) return;
-  $('photogrid').replaceChildren(...names.map((n) => {
-    const fig = document.createElement('figure'), a = document.createElement('a'), im = new Image(), cap = document.createElement('figcaption');
-    a.href = im.src = `${base}photos/${n}`;
-    a.target = '_blank';
-    im.alt = cap.textContent = n.slice(3, -4).replace(/_/g, ' ');
-    im.loading = 'lazy';
-    a.append(im);
-    fig.append(a, cap);
-    return fig;
-  }));
-  $('photosbtn').hidden = false;
-  if (q.has('photos')) showPhotos();
-});
-function showPhotos() { document.exitPointerLock?.(); $('gallery').hidden = false; }
-$('photosbtn').onclick = showPhotos;
-$('closephotos').onclick = () => { $('gallery').hidden = true; };
-addEventListener('keydown', (e) => { if (e.code === 'Escape') $('gallery').hidden = true; });
 $('blend').onclick = async () => {        // the server packs the textures into one .blend (a few seconds, once per build)
   const b = $('blend');
   b.disabled = true;

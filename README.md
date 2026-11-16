@@ -37,7 +37,6 @@ flowchart LR
 | 3D | `blender/gen.py` | Walls with openings cut, sills and lintels, frames and glass, floors per room type, stairs, roof with parapet, site with road and trees |
 | Lighting | `blender/bake.py` | Cycles bakes direct and bounced light into one light map per storey. The browser multiplies textures by it: no real-time lights, so it runs on any GPU |
 | Viewer | `web/view.js` | three.js, unlit materials, wall collision, stairs between storeys |
-| Photos | `blender/photos.py` | Optional: Cycles renders each room from the corner that best shows its main piece of furniture |
 
 ## Quick start
 
@@ -93,7 +92,6 @@ python server.py
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
 | **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |
-| **Realistic photos** | Tick **Realistic photos** on the review page: after the build, Blender's Cycles engine renders a photo of every room (about 40 s per room on an RTX 3050). **Photos** in the walkthrough shows them |
 | **Furniture models in the review page** | **Change furniture models** opens the furniture page in a window, so you can swap a model and then build |
 
 ### Your own furniture
@@ -102,7 +100,7 @@ python server.py
 |---|---|
 | ![Furniture page](docs/furniture.png) | ![Custom sofa](docs/custom_sofa.png) |
 
-**Which renderer does what.** The walkthrough runs in the browser with three.js. Its light and shadows are computed once by Blender's Cycles engine and baked into light maps, so walking is smooth on any GPU but reflections and glossy highlights are not shown. Realistic photos are full Cycles renders: real reflections, soft shadows and bounced light, at the cost of extra build time. EEVEE is only used for the small pictures on the furniture page.
+**Which renderer does what.** The walkthrough runs in the browser with three.js. Its light and shadows are computed once by Blender's Cycles engine and baked into light maps, so walking is smooth on any GPU but reflections and glossy highlights are not shown.
 
 ## Build time and accuracy
 
@@ -158,7 +156,7 @@ sequenceDiagram
 | `GET /api/jobs/{id}` | `{ stage, progress, message, floors, eta_left }`. Stages: `detecting`, `detected`, `queued`, `building`, `done`, `failed` |
 | `GET /jobs/{id}/plan.json` | The detected plan (feet): walls, openings, rooms, stairs per storey |
 | `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms |
-| `POST /api/jobs/{id}/build` | Body `{ "quality": "draft" \| "high", "photos": true }`. Builds run one at a time. With `photos`, the job's `photos` list names the files in `/jobs/{id}/photos/` |
+| `POST /api/jobs/{id}/build` | Body `{ "quality": "draft" \| "high" }`. Builds run one at a time |
 | `POST /api/jobs/{id}/export` | Packs the Blender file. Returns `{ url }` of the zip |
 | `GET /web/view.html?job={id}` | The walkthrough. `&embed` hides the link back to the upload page |
 | `GET /web/edit.html?job={id}` | The review page |
@@ -177,7 +175,7 @@ vector.py          PDF lines, curves, fills and words (poppler)
 furnish.py         furniture rules (pure Python)
 catalog.py         furniture that can be replaced by your own models
 fetch_assets.py    downloads the CC0 textures, models and sky
-blender/           gen.py (build), bake.py (light maps), lib.py (parts), photos.py (Cycles room photos), cinema.py (video)
+blender/           gen.py (build), bake.py (light maps), lib.py (parts), cinema.py (video renderer)
 web/               home, review and walkthrough pages
 examples/          sample_plan.pdf, its generator, embed.html
 tests/             detector, furniture, walking and browser tests

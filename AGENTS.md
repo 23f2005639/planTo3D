@@ -25,13 +25,11 @@ Needs Python 3, Node 18+, Blender 4.2+ and poppler. If Blender is not on `PATH`,
 | `blender/gen.py` | plan JSON -> house (run inside Blender). `CALLS` maps item `fn` to the function that builds it |
 | `blender/lib.py` | materials, box meshes, furniture parts. Feet in, metres out (`F = 0.3048`) |
 | `blender/bake.py` | light maps (Cycles) and `house.glb` export |
-| `blender/photos.py` | optional realistic room photos (Cycles) from `house_baked.blend`, run by the server after the build |
 | `web/` | `index.html` (upload), `edit.html` + `edit.js` (review), `view.html` + `view.js` (walkthrough), `walk.js` (collision, stairs, start point), `furniture.html` |
 | `examples/` | `sample_plan.pdf`, its generator `make_sample.py`, `embed.html` |
 | `tools/` | video and debugging helpers, not used by the server |
 
 Flow: upload -> `run_detect` -> `plan.json` -> review page edits it -> `POST …/build` -> `gen.py` -> `bake.py` -> `house.glb`, `meta.json`, light maps -> `view.js`.
-With `"photos": true` the server then runs `photos.py`, which writes `photos/*.jpg` and the job's `photos` list.
 
 ## Conventions
 
