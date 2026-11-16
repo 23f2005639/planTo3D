@@ -7,9 +7,8 @@ from catalog import CATALOG, CELL  # noqa: E402
 
 out, F = sys.argv[sys.argv.index("--") + 1], 0.3048
 sc = bpy.context.scene
-sc.render.engine = "BLENDER_WORKBENCH"
-sc.display.shading.light, sc.display.shading.color_type = "STUDIO", "TEXTURE"
-sc.display.shading.show_shadows = True
+eng = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
+sc.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in eng else "BLENDER_EEVEE"   # real materials, quick
 sc.render.resolution_x, sc.render.resolution_y = 480, 360
 cam = bpy.data.objects.new("thumb", bpy.data.cameras.new("thumb"))
 sc.collection.objects.link(cam)

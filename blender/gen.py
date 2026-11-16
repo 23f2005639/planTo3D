@@ -39,7 +39,6 @@ mat("pebbles", tex="dry_river_pebbles", tile=0.8)
 mat("terrace", tex="concrete_tiles", tile=1.5)
 mat("turf", tex="leafy_grass", tile=1.0, tint=(0.5, 0.75, 0.35))
 mat("exterior", (0.93, 0.91, 0.87), 0.9, tex="white_plaster_02", tile=2.5, albedo=False)
-mat("sofa_fabric", rough=0.95, tex="fabric_pattern_07", tile=0.6, tint=(0.75, 0.7, 0.62))
 mat("cushion", rough=0.95, tex="caban", tile=0.5, tint=(0.55, 0.45, 0.35))
 
 FLOOR_MAT = dict(dress="wood", bedroom="wood", toilet="bathtile", kitchen="marble", living="marble", dining="marble", puja="marble",
@@ -106,6 +105,46 @@ def opening_heights(f, o):
     return (6.0, 7.5) if wet or width <= VENT_MAX else (3.0, 7.0)
 
 
+CURTAIN_ROOMS = {"bedroom", "living", "dining", "study", "room", "dress", "puja"}
+
+
+def curtains(f, items):
+    """linen curtains on a brass rod at each full-size window of a living room or bedroom, on the room side.
+    Floor length, unless furniture stands in front of the window: then they stop above the sill."""
+    for o in f["openings"]:
+        if o["type"] != "window":
+            continue
+        sill, head = opening_heights(f, o)
+        if sill >= 5:                        # high ventilator or bathroom window
+            continue
+        x0, x1, y0, y1 = o["rect"]
+        along_x = o["axis"] == "x"
+        a0, a1 = (x0, x1) if along_x else (y0, y1)
+        for side in (-1, 1):
+            face = (y0 if side < 0 else y1) if along_x else (x0 if side < 0 else x1)
+            probe = (((x0 + x1) / 2, face + side), (face + side, (y0 + y1) / 2))[not along_x]
+            zn = zone_at(f, *probe)
+            if not zn or zn["type"] not in CURTAIN_ROOMS:
+                continue
+            plane = face + side * 0.3
+            strip = (a0 - 0.6, a1 + 0.6, *sorted((face, face + side * 1.2)))
+            if not along_x:
+                strip = (strip[2], strip[3], strip[0], strip[1])
+            blocked = any(it.get("box") and overlap((*strip, 0, 1), (*it["box"], 0, 1)) for it in items)
+            bottom = sill - 0.3 if blocked else 0.1
+            rod = min(head + 0.6, lib.WALL_H - 0.3)
+            c = (a0 + a1) / 2
+            r = item("curtain", c if along_x else plane, plane if along_x else c, 0 if along_x else 90)
+            span = a1 - a0 + 1.4
+            p_cyl(r, "curtain_rod", 0.05, 0.05, span, "brass", (-span / 2, 0, rod), rot=(0, 90, 0), segs=12)
+            for s_ in (-1, 1):
+                p_cyl(r, "rod_end", 0.1, 0.1, 0.12, "brass", (s_ * span / 2, 0, rod), rot=(0, 90, 0), segs=12)
+            pw = max(1.3, (a1 - a0) * 0.3)
+            for s_ in (-1, 1):
+                p_pleats(r, "curtain", pw, rod - bottom, "curtain", (s_ * ((a1 - a0) / 2 + 0.6 - pw / 2), 0, bottom))
+            done(r, collide=False)
+
+
 # ------------------------------------------------------------------ stairs
 def stair_parts(f, rise):
     """flights + landing from the detected tread runs. The flight next to the UP word starts at floor level
@@ -170,20 +209,41 @@ def nightstand(x, y, rot):
 
 
 def sofa(x, y, rot, w=7.0):
+    """velvet sofa: rounded arms and back, loose seat and back cushions, throw pillows, brass feet"""
     hw = w / 2
-    group("sofa", [(-hw, hw, -1.5, 1.5, 0.3, 1.4, "sofa_fabric"), (-hw, hw, 0.8, 1.5, 1.4, 2.8, "sofa_fabric"),
-                   (-hw, -hw + 0.6, -1.5, 1.5, 1.4, 2.2, "sofa_fabric"), (hw - 0.6, hw, -1.5, 1.5, 1.4, 2.2, "sofa_fabric"),
-                   (-hw + 0.3, hw - 0.3, -1.5, 1.4, 0, 0.3, "black")], x, y, rot, bevel=0.1, seg=3)
-    n = max(2, round((w - 1.2) / 2.2))
-    cw = (w - 1.2) / n
-    cush = [(-hw + 0.6 + cw * i + 0.03, -hw + 0.6 + cw * (i + 1) - 0.03, -1.4, 0.8, 1.4, 1.95, "cushion") for i in range(n)]
-    cush += [(-hw + 0.6 + cw * i + 0.05, -hw + 0.6 + cw * (i + 1) - 0.05, 0.35, 0.85, 1.95, 3.0, "cushion") for i in range(n)]
-    group("sofa_cushions", cush, x, y, rot, bevel=0.18, seg=4, collide=False)
+    r = item("sofa", x, y, rot)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            p_cyl(r, "sofa_foot", 0.08, 0.05, 0.35, "brass", (sx * (hw - 0.35), sy * 1.2, 0), segs=16)
+    p_soft(r, "sofa_base", w, 3.0, 0.9, "velvet", (0, 0, 0.35), r=0.12)
+    for s_ in (-1, 1):
+        p_soft(r, "sofa_arm", 0.62, 3.0, 1.9, "velvet", (s_ * (hw - 0.31), 0, 0.35), r=0.25)
+    p_soft(r, "sofa_back", w - 1.2, 0.6, 1.55, "velvet", (0, 1.2, 1.2), r=0.2)
+    n = max(2, round((w - 1.24) / 2.2))
+    cw = (w - 1.24) / n
+    for i in range(n):
+        cx = -hw + 0.62 + cw * (i + 0.5)
+        p_soft(r, "seat_cushion", cw - 0.04, 2.35, 0.55, "velvet", (cx, -0.3, 1.2), r=0.2)
+        p_soft(r, "back_cushion", cw - 0.06, 0.55, 1.45, "velvet", (cx, 0.62, 1.68), (-12, 0, 0), r=0.24)
+    for s_, m in ((-1, "jacquard"), (1, "boucle")):
+        p_soft(r, "throw_pillow", 1.3, 0.38, 1.3, m, (s_ * (hw - 1.45), 0.2, 1.72), (-24, 0, -s_ * 12), r=0.22)
+    return done(r)
 
 
 def coffee_table(x, y, rot):
-    group("coffee_table", [(-1.8, 1.8, -1.0, 1.0, 1.25, 1.4, "teak"), (-1.6, 1.6, -0.8, 0.8, 0.0, 0.1, "black"),
-                           (-0.1, 0.1, -0.1, 0.1, 0.1, 1.25, "steel")], x, y, rot, bevel=0.03)
+    """tea table: oval white marble top on a walnut base with a shelf; books and a bowl on top"""
+    r = item("coffee_table", x, y, rot)
+    p_cyl(r, "table_top", 1.0, 1.0, 0.1, "marble_top", (0, 0, 1.35), sx=1.8, segs=64, bevel=0.03, seg=2)
+    p_cyl(r, "table_apron", 0.92, 0.92, 0.18, "teak", (0, 0, 1.17), sx=1.82, segs=64)
+    p_cyl(r, "table_shelf", 0.85, 0.85, 0.08, "teak", (0, 0, 0.35), sx=1.8, segs=64)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            p_cyl(r, "table_leg", 0.07, 0.1, 1.17, "teak", (sx * 1.05, sy * 0.48, 0), segs=16)
+    p_box(r, "book", 0.9, 0.65, 0.1, "blue_accent", (-0.7, 0.05, 1.45), (0, 0, 8), bevel=0.01)
+    p_box(r, "book", 0.8, 0.6, 0.08, "throw", (-0.68, 0.08, 1.55), (0, 0, -4), bevel=0.01)
+    p_bowl(r, "bowl", 0.35, 0.22, "ceramic", (0.75, -0.05, 1.67))
+    p_box(r, "tray", 1.0, 0.6, 0.05, "brass", (0.0, 0.0, 0.43), bevel=0.01)
+    return done(r)
 
 
 def tv_unit(x, y, rot):
@@ -459,6 +519,8 @@ for k, f in enumerate(floors):
             custom(it) or CALLS[it["fn"]](*it["args"], **it["kw"])
         except Exception as e:     # one bad item must not stop the build
             print("ITEM FAILED", it["fn"], e, flush=True)
+    if items:
+        curtains(f, items)
     # lamps (emissive panel + area light for the bake) in roofed rooms
     for zn in f["rooms"]:
         if zn["type"] not in INDOOR and zn["type"] not in ("balcony", "parking", "stair"):

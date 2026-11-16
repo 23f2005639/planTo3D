@@ -71,7 +71,7 @@ const FIX = {
   blender: (c) => (c.version ? `Blender ${c.version} found, but 4.2 or newer is needed.` : 'Blender 4.2 or newer was not found. Install it from blender.org (or: snap install blender --classic), then restart the server.'),
   pdf_tools: () => 'The PDF tools were not found. Install poppler (apt install poppler-utils, or brew install poppler).',
   viewer: () => 'The 3D viewer library is missing. Run "npm install" in the project folder.',
-  materials: () => 'Textures and models are not downloaded yet (about 60 MB, free CC0 files from Poly Haven).',
+  materials: () => 'Textures and models are not downloaded yet (about 75 MB, free CC0 files from Poly Haven).',
 };
 async function checkSystem() {
   const s = await fetch('/api/system').then((r) => r.json()), m = s.materials;

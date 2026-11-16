@@ -7,7 +7,7 @@ There is no AI model in the pipeline: detection is geometry, furniture is rules,
 
 ```bash
 ./run.sh --port 8080              # npm install (three.js) + python3 server.py
-python3 fetch_assets.py           # CC0 textures and models into assets/ (about 60 MB), once
+python3 fetch_assets.py           # CC0 textures and models into assets/ (about 75 MB), once
 ```
 
 Needs Python 3, Node 18+, Blender 4.2+ and poppler. If Blender is not on `PATH`, set `BLENDER` to its full path.

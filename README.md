@@ -47,7 +47,7 @@ git clone <this repo> && cd planto3d
 ./run.sh                         # installs three.js, serves http://127.0.0.1:8080
 ```
 
-Open the page. It checks Blender, the PDF tools, the viewer library and the materials, and accepts a plan only when all four are in place. The textures and models (about 60 MB, CC0, from [Poly Haven](https://polyhaven.com)) are not in the repository: press **Download materials** on the page, or run `python3 fetch_assets.py`.
+Open the page. It checks Blender, the PDF tools, the viewer library and the materials, and accepts a plan only when all four are in place. The textures and models (about 75 MB, CC0, from [Poly Haven](https://polyhaven.com)) are not in the repository: press **Download materials** on the page, or run `python3 fetch_assets.py`.
 
 Then press **Try the sample plan**, or drop your own PDF on the page.
 

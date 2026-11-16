@@ -237,7 +237,7 @@ def bedroom(R):
         c = x if side in "NS" else y
         iv = next(((a, b) for a, b in R.free[side]["tall"] if a - 0.01 <= c <= b + 0.01), (c - bw / 2, c + bw / 2))
         panel = max(0.0, min(bw + 3.2 if stands else bw + 1.0, 2 * min(c - iv[0], iv[1] - c) - 0.2))
-        R.add("bed", bb, x, y, rot, w=bw, l=bl, blanket="fabric_blanket", panel=round(panel, 2))
+        R.add("bed", bb, x, y, rot, w=bw, l=bl, panel=round(panel, 2))
         if stands:
             for s in (-1, 1):
                 off = (bw / 2 + 0.8) * s

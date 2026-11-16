@@ -1,6 +1,8 @@
 """Blender building blocks used by gen.py: materials, box meshes, furniture and fixtures (units: feet).
 Textures and models come from ../assets (python3 fetch_assets.py)."""
 import bpy, bmesh, json, math, os, sys
+import numpy as np
+import random
 from mathutils import Vector, Matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,9 +33,40 @@ def tex_node(nt, path, non_color=False):
     return n
 
 
+def _grey(img):
+    """the photo's weave and shading without its colour (mean brightness 0.8), so a tint can set any colour"""
+    w, h = img.size
+    px = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(-1, 4)
+    lum = px[:, :3] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    lum = np.clip(lum * (0.8 / max(float(lum.mean()), 1e-3)), 0, 1)
+    out = bpy.data.images.new(img.name + "_grey", w, h)
+    rgba = np.ones((w * h, 4), np.float32)
+    rgba[:, :3] = lum[:, None]
+    out.pixels.foreach_set(rgba.ravel())
+    out.pack()
+    return out
+
+
+def _brushed():
+    """brushed stainless steel: fine streaks along u (no such photo on Poly Haven)"""
+    rnd = np.random.default_rng(7)
+    n = 512
+    rows = rnd.normal(0, 1, (n, 1)) * 0.035 + rnd.normal(0, 1, (n, n)) * 0.012
+    k = np.ones(48, np.float32) / 48            # smear the speckle along u into streaks
+    rows = np.array([np.convolve(np.tile(r, 2), k, "same")[n // 2:n // 2 + n] for r in rows])
+    v = np.clip(0.72 + rows, 0, 1).astype(np.float32)
+    img = bpy.data.images.new("brushed_steel", n, n)
+    img.pixels.foreach_set(np.stack([v, v, v * 1.01, np.ones_like(v)], -1).clip(0, 1).ravel())
+    img.pack()
+    return img
+
+
 def mat(name, color=(0.8, 0.8, 0.8), rough=0.5, metal=0.0, tex=None, tile=1.0, alpha=1.0,
-        emit=0.0, tint=None, albedo=True):
-    """tile = metres covered by one texture repeat (UVs are written in metres / tile)."""
+        emit=0.0, tint=None, albedo=True, grey=False, image=None):
+    """tile = metres covered by one texture repeat (UVs are written in metres / tile).
+    grey: drop the photo's own colour so tint is the colour; image: a generated image as the albedo."""
     m = bpy.data.materials.new(name)
     m.use_nodes = True
     nt = m.node_tree
@@ -45,6 +78,8 @@ def mat(name, color=(0.8, 0.8, 0.8), rough=0.5, metal=0.0, tex=None, tile=1.0, a
         d = os.path.join(ASSETS, "textures", tex)
         if albedo and os.path.exists(os.path.join(d, "diff.jpg")):   # albedo=False: bump only (smooth paint)
             t = tex_node(nt, os.path.join(d, "diff.jpg"))
+            if grey:
+                t.image = _grey(t.image)
             if tint:  # multiply albedo by a tint colour
                 mix = nt.nodes.new("ShaderNodeMix")
                 mix.data_type = "RGBA"
@@ -63,6 +98,10 @@ def mat(name, color=(0.8, 0.8, 0.8), rough=0.5, metal=0.0, tex=None, tile=1.0, a
             nm = nt.nodes.new("ShaderNodeNormalMap")
             nt.links.new(n.outputs["Color"], nm.inputs["Color"])
             nt.links.new(nm.outputs["Normal"], p.inputs["Normal"])
+    if image:
+        t = nt.nodes.new("ShaderNodeTexImage")
+        t.image = image
+        nt.links.new(t.outputs["Color"], p.inputs["Base Color"])
     if alpha < 1:
         p.inputs["Alpha"].default_value = alpha
         if hasattr(m, "surface_render_method"):
@@ -93,6 +132,10 @@ mat("terracotta", tex="terracotta_floor_tiles", tile=1.2)
 mat("concrete", tex="concrete_floor", tile=2.0)
 mat("grass", tex="leafy_grass", tile=1.5, tint=(0.55, 0.8, 0.4))
 mat("granite", rough=0.15, tex="marble_01", tile=1.5, tint=(0.12, 0.11, 0.11))   # black marble slab
+mat("stone_top", rough=0.2, tex="terrazzo_tiles", tile=0.9, grey=True, tint=(0.36, 0.35, 0.34))   # speckled granite worktop
+mat("stone_wall", rough=0.2, tex="marble_01", tile=1.0, tint=(0.95, 0.93, 0.9))
+mat("pebble_floor", rough=0.7, tex="dry_river_pebbles", tile=0.6)
+mat("marble_top", rough=0.15, tex="marble_01", tile=1.0)
 mat("stair", (0.62, 0.58, 0.52), 0.4, tex="granite_tile", tile=1.0)
 mat("glass", (0.75, 0.85, 0.9), 0.05, alpha=0.18)
 mat("frame", (0.92, 0.92, 0.92), 0.4)                 # uPVC/powder-coated window frames
@@ -101,16 +144,21 @@ mat("teak", rough=0.4, tex="black_walnut_veneer_01", tile=1.0, tint=(0.5, 0.3, 0
 mat("laminate_w", rough=0.4, tex="oak_veneer_01", tile=1.2)
 mat("white_gloss", (0.93, 0.93, 0.92), 0.15)
 mat("ceramic", (0.97, 0.97, 0.96), 0.08)
-mat("fabric_bed", rough=0.9, tex="cotton_jersey", tile=0.4, tint=(1.0, 0.98, 0.95))
+mat("sheet", rough=0.9, tex="stretch_poplin", tile=0.35, grey=True, tint=(1.0, 0.99, 0.97))
+mat("duvet", rough=0.95, tex="waffle_pique_cotton", tile=0.3, grey=True, tint=(0.93, 0.9, 0.85))
+mat("throw", rough=1.0, tex="knitted_fleece", tile=0.35, grey=True, tint=(0.62, 0.34, 0.24))
+mat("velvet", rough=0.8, tex="velour_velvet", tile=0.5, grey=True, tint=(0.3, 0.42, 0.4))
+mat("velvet_head", rough=0.8, tex="velour_velvet", tile=0.5, grey=True, tint=(0.62, 0.55, 0.48))
+mat("jacquard", rough=0.9, tex="quatrefoil_jacquard_fabric", tile=0.35, grey=True, tint=(0.95, 0.72, 0.35))
+mat("boucle", rough=1.0, tex="wool_boucle", tile=0.4, grey=True, tint=(0.95, 0.92, 0.86))
 mat("fabric_blanket", rough=0.9, tex="floral_jacquard", tile=0.6, tint=(1.0, 0.75, 0.7))
-mat("fabric_blue", rough=0.9, tex="gingham_check", tile=0.5, tint=(0.6, 0.75, 1.0))
-mat("fabric_green", rough=0.95, tex="caban", tile=0.6, tint=(0.7, 0.85, 0.65))
 mat("rug", rough=1.0, tex="hessian_380", tile=0.8, tint=(0.9, 0.75, 0.6))
-mat("curtain", rough=0.7, tex="cotton_jersey", tile=0.5, tint=(0.88, 0.82, 0.72))
+mat("curtain", rough=0.9, tex="rough_linen", tile=0.6, grey=True, tint=(0.95, 0.9, 0.8))
 mat("black", (0.02, 0.02, 0.02), 0.3)
 mat("screen", (0.01, 0.01, 0.015), 0.05)
 mat("light", (1.0, 0.95, 0.85), 0.5, emit=6.0)
 mat("appliance", (0.8, 0.8, 0.82), 0.3, 0.8)
+mat("steel_brushed", rough=0.3, metal=0.9, image=_brushed(), tile=0.6)
 
 # ---------------------------------------------------------------- geometry helpers
 COLL = {}
@@ -271,25 +319,39 @@ def group(name, boxes, x, y, rot=0, bevel=0.0, collide=True, z=0.0, seg=2):
 
 
 # rot convention for procedural items: 0 -> front faces -y, 90 -> +x, 180 -> +y, 270 -> -x
-def bed(x, y, rot, w=5.0, l=6.6, blanket="fabric_blanket", panel=None):
-    """panel: width of the wood panel on the wall behind the bed (default bed + 1.8 ft each side; 0 = none)"""
+def bed(x, y, rot, w=5.0, l=6.6, blanket="throw", panel=None):
+    """upholstered bed made up with sheet, duvet, a throw and pillows. blanket: material of the throw at the foot.
+    panel: width of the wood panel on the wall behind the bed (default bed + 1.8 ft each side; 0 = none)"""
     hw = w / 2
     yb, yf = l / 2, -l / 2                      # head (back) at +y local
     hp = hw + 1.8 if panel is None else panel / 2
     if hp > 0:
         group("accent_panel", [(-hp, hp, yb - 0.03, yb, 0, WALL_H - 0.01, "wall_accent")],
               x, y, rot, collide=False)   # panel sits flush on the wall behind the headboard
-    group("bed_frame", [(-hw, hw, yf, yb - 0.25, 0.25, 1.1, "teak"),
-                        (-hw, hw, yb - 0.25, yb, 0, 3.6, "teak"),
-                        (-hw + 0.1, hw - 0.1, yb - 0.45, yb - 0.25, 1.6, 3.3, "fabric_bed")],
-          x, y, rot, bevel=0.04)
-    group("mattress", [(-hw + 0.1, hw - 0.1, yf + 0.1, yb - 0.3, 1.1, 1.75, "fabric_bed")],
-          x, y, rot, bevel=0.12, seg=3, collide=False)
-    group("blanket", [(-hw + 0.02, hw - 0.02, yf + 0.02, yb - 2.2, 1.6, 1.82, blanket)],
-          x, y, rot, bevel=0.08, seg=3, collide=False)
-    group("pillows", [(-hw + 0.3, -0.15, yb - 1.8, yb - 0.5, 1.7, 2.15, "fabric_bed"),
-                      (0.15, hw - 0.3, yb - 1.8, yb - 0.5, 1.7, 2.15, "fabric_bed")],
-          x, y, rot, bevel=0.15, seg=3, collide=False)
+    if blanket not in MATS:
+        blanket = "throw"
+    seed = round(x * 7 + y * 13)
+    r = item("bed", x, y, rot)
+    p_box(r, "bed_plinth", w - 0.5, l - 0.8, 0.3, "black", (0, -0.2, 0), bevel=0.01)
+    p_box(r, "bed_base", w, l - 0.35, 0.75, "teak", (0, -0.175, 0.3), bevel=0.05)
+    p_box(r, "headboard_back", w + 0.3, 0.15, 3.9, "teak", (0, yb - 0.1, 0), bevel=0.03)
+    n = max(3, round((w + 0.3) / 0.9))          # channel-tufted upholstered headboard
+    cw = (w + 0.3) / n
+    for i in range(n):
+        p_soft(r, "headboard", cw - 0.02, 0.4, 2.9, "velvet_head", (-(w + 0.3) / 2 + cw * (i + 0.5), yb - 0.37, 0.95),
+               r=0.17)
+    p_soft(r, "mattress", w - 0.15, l - 0.55, 0.75, "sheet", (0, -0.225, 1.05), r=0.12)
+    p_drape(r, "duvet", -hw + 0.08, hw - 0.08, yf + 0.1, yb - 2.1, 1.86, 0.85, "duvet", "xXy", thick=0.06, seed=seed)
+    p_soft(r, "duvet_fold", w - 0.1, 0.55, 0.3, "duvet", (0, yb - 2.1, 1.72), r=0.14)
+    p_drape(r, "throw", -hw, hw, yf + 0.3, yf + 1.7, 1.94, 1.0, blanket, "xX", thick=0.04, seed=seed)
+    pw, xs = (w - 0.6, (0,)) if w < 4 else (hw - 0.3, (-w / 4, w / 4))
+    for px in xs:                                # sleeping pillows leaning on the headboard
+        p_soft(r, "pillow", pw, 0.55, 1.35, "sheet", (px, yb - 0.95, 1.75), (-18, 0, 0), r=0.26)
+    if w >= 4:                                   # cushions in front of them
+        for k, s in enumerate((-1, 1)):
+            p_soft(r, "cushion", 1.25, 0.4, 1.25, "jacquard", (s * (w / 4 - 0.1), yb - 1.45, 1.8), (-22, 0, s * 6), r=0.2)
+        p_soft(r, "cushion", 1.1, 0.35, 0.8, "boucle", (0, yb - 1.6, 1.8), (-15, 0, 0), r=0.16)
+    return done(r)
 
 
 def wardrobe(x, y, rot, w=6.0, d=2.0, h=7.0):
@@ -369,7 +431,21 @@ mat("water", (0.55, 0.7, 0.75), 0.02, alpha=0.5)
 mat("blue_accent", (0.1, 0.35, 0.75), 0.3)
 
 
-def _mesh_obj(name, bm, mn, parent, loc=(0, 0, 0), rot=(0, 0, 0), smooth=40, bevel=0.0, seg=3, solid=0.0):
+def _box_uv(bm, tile):
+    """texture UVs in metres / tile, projected along each face's main axis (as mesh_from_boxes does)"""
+    uv = bm.loops.layers.uv.new("UVMap")
+    for f in bm.faces:
+        f.normal_update()
+        ax = max(range(3), key=lambda i: abs(f.normal[i]))
+        a, c = [(1, 2), (0, 2), (0, 1)][ax]
+        for lp in f.loops:
+            lp[uv].uv = (lp.vert.co[a] / tile, lp.vert.co[c] / tile)
+
+
+def _mesh_obj(name, bm, mn, parent, loc=(0, 0, 0), rot=(0, 0, 0), smooth=40, bevel=0.0, seg=3, solid=0.0, soft=0):
+    """soft: subdivision levels after the bevel, for upholstery and pillows"""
+    if not bm.loops.layers.uv:
+        _box_uv(bm, MATS[mn]["tile"])
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -389,7 +465,68 @@ def _mesh_obj(name, bm, mn, parent, loc=(0, 0, 0), rot=(0, 0, 0), smooth=40, bev
         md = ob.modifiers.new("bevel", "BEVEL")
         md.width, md.segments, md.limit_method = bevel * F, seg, "ANGLE"
         md.harden_normals = False
+    if soft:
+        md = ob.modifiers.new("soft", "SUBSURF")
+        md.levels = md.render_levels = soft
     return ob
+
+
+def p_soft(root, name, sx, sy, sz, mn, loc=(0, 0, 0), rot=(0, 0, 0), r=0.15):
+    """upholstered block: a box with round edges r (feet), smoothed into a slightly puffy cushion"""
+    return p_box(root, name, sx, sy, sz, mn, loc, rot, bevel=min(r, sx / 2.2, sy / 2.2, sz / 2.2), seg=2, soft=2,
+                 smooth=180)
+
+
+def p_drape(root, name, x0, x1, y0, y1, top, hang, mn, sides="xX y", thick=0.07, seed=0, step=0.12):
+    """cloth lying on the rectangle x0..x1, y0..y1 at height top and falling over the edges named in sides
+    (x = -x, X = +x, y = -y, Y = +y) by hang feet, with soft folds; local feet like p_box"""
+    rnd = random.Random(seed)
+    ex = [hang if "x" in sides else 0, hang if "X" in sides else 0, hang if "y" in sides else 0, hang if "Y" in sides else 0]
+    us = [x0 - ex[0] + i * step for i in range(int((x1 - x0 + ex[0] + ex[1]) / step) + 1)]
+    vs = [y0 - ex[2] + j * step for j in range(int((y1 - y0 + ex[2] + ex[3]) / step) + 1)]
+    ph = [rnd.uniform(0, 6.3) for _ in range(4)]
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new("UVMap")
+    grid = []
+    for v in vs:
+        row = []
+        for u in us:
+            dx, dy = max(0, x0 - u, u - x1), max(0, y0 - v, v - y1)
+            drop = math.hypot(dx, dy)
+            flare = 0.04 + 0.1 * drop                         # cloth stands off the edge a little more as it falls
+            px = min(max(u, x0 - flare), x1 + flare)
+            py = min(max(v, y0 - flare), y1 + flare)
+            k = min(drop, 0.6) / 0.6                     # vertical folds: they vary along the edge, not down it
+            px += 0.05 * k * math.sin(v * 3.1 + ph[0]) * (1 if u > x1 else -1 if u < x0 else 0)
+            py += 0.05 * k * math.sin(u * 3.1 + ph[1]) * (1 if v > y1 else -1 if v < y0 else 0)
+            pz = top - drop + (0.02 * math.sin(u * 2.3 + ph[2]) * math.sin(v * 1.9 + ph[3]) if drop == 0 else 0)
+            row.append(bm.verts.new((px * F, py * F, pz * F)))
+        grid.append(row)
+    for j in range(len(vs) - 1):
+        for i in range(len(us) - 1):
+            f = bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]))
+            for lp, (a, b) in zip(f.loops, ((i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1))):
+                lp[uv].uv = (us[a] * F / MATS[mn]["tile"], vs[b] * F / MATS[mn]["tile"])
+    return _mesh_obj(name, bm, mn, root, smooth=80, solid=thick, soft=1)
+
+
+def p_pleats(root, name, width, h, mn, loc=(0, 0, 0), rot=(0, 0, 0), depth=0.14, pitch=0.42):
+    """curtain panel hanging from its top edge: width along local x (centred), pleated in y, bottom at z=0"""
+    n = max(2, round(width / pitch * 8))
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new("UVMap")
+    cols = []
+    for i in range(n + 1):
+        x = -width / 2 + width * i / n
+        y = depth / 2 * math.sin(2 * math.pi * x / pitch)
+        cols.append([bm.verts.new((x * F, (y + (depth * 0.4 * math.sin(x * 1.3) if z == 0 else 0)) * F, z * F))
+                     for z in (0, h)])
+    t = MATS[mn]["tile"]
+    for i in range(n):
+        f = bm.faces.new((cols[i][0], cols[i + 1][0], cols[i + 1][1], cols[i][1]))
+        for lp, (a, b) in zip(f.loops, ((i, 0), (i + 1, 0), (i + 1, 1), (i, 1))):
+            lp[uv].uv = ((-width / 2 + width * a / n) * 1.3 * F / t, b * h * F / t)
+    return _mesh_obj(name, bm, mn, root, loc, rot, smooth=80, solid=0.03)
 
 
 def _bm_xform(bm, scale=(1, 1, 1), lift=0.0):
@@ -410,8 +547,9 @@ def p_box(root, name, sx, sy, sz, mn, loc=(0, 0, 0), rot=(0, 0, 0), bevel=0.02, 
     """box centred on x/y, base at z=0 (feet)."""
     bm = bmesh.new()
     bmesh.ops.create_cube(bm, size=1.0)
+    kw.setdefault("smooth", 30)
     return _mesh_obj(name, _bm_xform(bm, (sx * F, sy * F, sz * F), sz * F / 2), mn, root, loc, rot,
-                     smooth=30, bevel=bevel, seg=seg, **kw)
+                     bevel=bevel, seg=seg, **kw)
 
 
 def p_frustum(root, name, w0, d0, w1, d1, h, mn, loc=(0, 0, 0), **kw):
@@ -543,12 +681,14 @@ def shower2(x, y, rot, glass=None):
     r = item("shower", x, y, rot)
     p_tube(r, "shower_arm", [(0, 0.0, 7.4), (0, -0.4, 7.4), (0, -0.9, 7.3), (0, -1.1, 7.15)], 0.05, "chrome")
     p_box(r, "shower_head", 0.85, 0.85, 0.05, "chrome", (0, -1.1, 7.05), bevel=0.02)
-    p_cyl(r, "mixer_plate", 0.28, 0.28, 0.04, "chrome", (0, 0.02, 3.8), rot=(90, 0, 0))
-    p_box(r, "mixer_lever", 0.06, 0.12, 0.4, "chrome", (0, -0.06, 3.75), bevel=0.02)
-    p_box(r, "floor_drain", 0.4, 0.4, 0.015, "steel", (0, -1.1, 0.0), bevel=0)
-    p_cyl(r, "hand_shower", 0.05, 0.07, 0.6, "chrome", (0.5, -0.05, 3.9), rot=(0, 0, 0))
-    p_tube(r, "hand_hose", [(0.5, -0.05, 3.9), (0.55, -0.15, 2.8), (0.4, -0.1, 2.2), (0.3, 0.0, 3.6)], 0.025,
+    p_cyl(r, "mixer_plate", 0.28, 0.28, 0.04, "chrome", (0, -0.09, 3.8), rot=(90, 0, 0))
+    p_box(r, "mixer_lever", 0.06, 0.12, 0.4, "chrome", (0, -0.16, 3.75), bevel=0.02)
+    p_box(r, "floor_drain", 0.4, 0.4, 0.015, "steel", (0, -1.1, 0.05), bevel=0)
+    p_cyl(r, "hand_shower", 0.05, 0.07, 0.6, "chrome", (0.5, -0.15, 3.9), rot=(0, 0, 0))
+    p_tube(r, "hand_hose", [(0.5, -0.15, 3.9), (0.55, -0.25, 2.8), (0.4, -0.2, 2.2), (0.3, -0.1, 3.6)], 0.025,
            "chrome")
+    p_box(r, "shower_wall", 2.6, 0.04, 7.6, "stone_wall", (0, -0.07, 0), bevel=0)     # in front of the 0.03 ft wall tiles
+    p_box(r, "shower_tray", 2.5, 2.5, 0.05, "pebble_floor", (0, -1.27, 0), bevel=0.005)
     done(r, collide=False)
     if glass:
         x0, x1, y0, y1 = glass
@@ -604,7 +744,7 @@ def kitchen_run(x0, x1, y0, y1, front, sink=None, hob=None, doors=True):
         holes.append((sx - 0.9, sx + 0.9, -0.55, 0.55, 2.0, 3.0))
     top = subtract_all(top, holes)
     for i, b in enumerate(top):
-        p_box(r, "counter_top", b[1] - b[0], b[3] - b[2], 0.15, "granite",
+        p_box(r, "counter_top", b[1] - b[0], b[3] - b[2], 0.15, "stone_top",
               ((b[0] + b[1]) / 2, (b[2] + b[3]) / 2, 2.75), bevel=0.01)
     p_box(r, "backsplash", L, 0.04, 2.0, "walltile", (0, Dp / 2 - 0.02, 2.9), bevel=0)
     if sink is not None:
@@ -654,22 +794,39 @@ def chimney(x, y, rot):
 
 
 def fridge2(x, y, rot):
+    """brushed steel French-door fridge with a freezer drawer"""
     r = item("fridge", x, y, rot)
-    p_box(r, "fridge_body", 2.3, 2.1, 5.8, "appliance", (0, 0.05, 0), bevel=0.1, seg=4)
+    p_box(r, "fridge_body", 2.3, 2.1, 5.8, "steel_brushed", (0, 0.05, 0), bevel=0.08, seg=3)
+    p_box(r, "fridge_gap", 2.2, 0.05, 5.6, "black", (0, -1.0, 0.1), bevel=0)
     for s in (-1, 1):
-        p_box(r, "fridge_door", 1.12, 0.12, 5.6, "appliance", (s * 0.58, -1.03, 0.1), bevel=0.06, seg=3)
-        p_tube(r, "fridge_handle", [(s * 0.12, -1.22, 2.6), (s * 0.12, -1.22, 4.4)], 0.04, "chrome")
-    p_box(r, "fridge_display", 0.4, 0.02, 0.5, "black_glass", (-0.6, -1.1, 3.8), bevel=0.01)
+        p_box(r, "fridge_door", 1.12, 0.14, 3.6, "steel_brushed", (s * 0.575, -1.05, 2.15), bevel=0.05, seg=3)
+        p_tube(r, "fridge_handle", [(s * 0.1, -1.25, 2.9), (s * 0.1, -1.25, 5.0)], 0.04, "chrome")
+    p_box(r, "freezer_drawer", 2.27, 0.14, 1.95, "steel_brushed", (0, -1.05, 0.15), bevel=0.05, seg=3)
+    p_tube(r, "freezer_handle", [(-0.7, -1.25, 1.85), (0.7, -1.25, 1.85)], 0.04, "chrome")
+    p_box(r, "fridge_display", 0.45, 0.02, 0.6, "black_glass", (-0.55, -1.13, 4.2), bevel=0.01)
+    p_box(r, "fridge_led", 0.25, 0.01, 0.06, "led", (-0.55, -1.145, 4.55), bevel=0)
     return done(r)
 
 
 def washer2(x, y, rot):
+    """front-loading washing machine: porthole door with a steel drum behind tinted glass, detergent drawer, dial"""
     r = item("washing_machine", x, y, rot)
-    p_box(r, "wm_body", 2.0, 1.9, 2.8, "white_gloss", (0, 0, 0), bevel=0.12, seg=4)
-    p_torus(r, "wm_ring", 0.55, 0.07, "chrome", (0, -0.97, 1.25), rot=(90, 0, 0))
-    p_cyl(r, "wm_glass", 0.5, 0.5, 0.05, "black_glass", (0, -0.93, 1.25), rot=(90, 0, 0))
-    p_box(r, "wm_panel", 1.9, 0.02, 0.4, "black_glass", (0, -0.96, 2.3), bevel=0.01)
-    p_cyl(r, "wm_knob", 0.12, 0.12, 0.05, "chrome", (0.6, -0.97, 2.5), rot=(90, 0, 0))
+    p_box(r, "wm_body", 2.0, 1.9, 2.75, "white_gloss", (0, 0, 0.05), bevel=0.1, seg=3)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            p_cyl(r, "wm_foot", 0.08, 0.08, 0.06, "black", (sx * 0.8, sy * 0.75, 0), segs=12)
+    p_box(r, "wm_seam", 1.98, 0.02, 0.02, "plastic_white", (0, -0.955, 2.25), bevel=0)
+    p_cyl(r, "wm_drum", 0.5, 0.5, 0.01, "steel_brushed", (0, -0.952, 1.2), rot=(90, 0, 0))
+    p_cyl(r, "wm_drum_hub", 0.18, 0.18, 0.012, "cast_iron", (0, -0.958, 1.2), rot=(90, 0, 0), segs=24)
+    p_torus(r, "wm_bezel", 0.6, 0.08, "plastic_white", (0, -0.97, 1.2), rot=(90, 0, 0))
+    p_torus(r, "wm_ring", 0.52, 0.05, "chrome", (0, -1.03, 1.2), rot=(90, 0, 0))
+    p_cyl(r, "wm_glass", 0.5, 0.42, 0.1, "glass", (0, -0.97, 1.2), rot=(90, 0, 0))
+    p_box(r, "wm_handle", 0.1, 0.06, 0.35, "chrome", (0.52, -1.07, 1.05), bevel=0.02)
+    p_box(r, "wm_drawer", 0.6, 0.04, 0.32, "plastic_white", (-0.6, -0.97, 2.32), bevel=0.02)
+    p_box(r, "wm_drawer_grip", 0.3, 0.02, 0.05, "black", (-0.6, -0.995, 2.45), bevel=0)
+    p_box(r, "wm_display", 0.45, 0.02, 0.22, "black_glass", (0.1, -0.965, 2.37), bevel=0.01)
+    p_box(r, "wm_digits", 0.2, 0.01, 0.06, "led", (0.1, -0.978, 2.45), bevel=0)
+    p_cyl(r, "wm_dial", 0.15, 0.13, 0.08, "chrome", (0.65, -0.95, 2.48), rot=(90, 0, 0), segs=24)
     return done(r)
 
 

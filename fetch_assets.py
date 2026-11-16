@@ -1,4 +1,4 @@
-"""Download the CC0 textures, models and sky this project builds with, from Poly Haven, into ./assets (about 60 MB).
+"""Download the CC0 textures, models and sky this project builds with, from Poly Haven, into ./assets (about 75 MB).
 python3 fetch_assets.py [--tour]    files already present are skipped; --tour adds the dusk sky for blender/cinema.py
 The server's home page runs the same download from its "Download materials" button."""
 import json, os, sys, urllib.request
@@ -6,10 +6,11 @@ import json, os, sys, urllib.request
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 MODELS = ["covered_car", "outdoor_table_chair_set_01", "street_lamp_01"]
 TEXTURES = ["american_walnut_veneer", "anti_skid_tiles", "asphalt_02", "black_walnut_veneer_01", "caban", "concrete_floor",
-            "concrete_tiles", "cotton_jersey", "dry_river_pebbles", "fabric_pattern_07", "floral_jacquard", "gingham_check",
-            "granite_tile", "herringbone_pavement", "hessian_380", "laminate_floor_02", "large_floor_tiles_02", "leafy_grass",
-            "long_white_tiles", "marble_01", "oak_veneer_01", "square_concrete_pavers", "terracotta_floor_tiles",
-            "white_plaster_02"]
+            "concrete_tiles", "cotton_jersey", "dry_river_pebbles", "floral_jacquard", "granite_tile",
+            "herringbone_pavement", "hessian_380", "knitted_fleece", "laminate_floor_02", "large_floor_tiles_02",
+            "leafy_grass", "long_white_tiles", "marble_01", "oak_veneer_01", "quatrefoil_jacquard_fabric",
+            "rough_linen", "square_concrete_pavers", "stretch_poplin", "terracotta_floor_tiles", "terrazzo_tiles",
+            "velour_velvet", "waffle_pique_cotton", "white_plaster_02", "wool_boucle"]
 SKY, TOUR_SKY = "kloofendal_48d_partly_cloudy_puresky", "qwantani_dusk_2_puresky"
 UA = {"User-Agent": "planto3d-fetch/1.0"}
 
