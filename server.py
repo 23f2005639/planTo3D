@@ -197,7 +197,7 @@ def photo_estimate(jid):
     return rooms * st["photo_seconds"] / max(1, len(st.get("photos") or []))
 
 
-PHOTO_ROOMS = {"bedroom", "living", "dining", "kitchen", "toilet", "study", "puja", "room", "dress", "balcony"}   # as in blender/photos.py
+PHOTO_ROOMS = {"bedroom", "living", "dining", "kitchen", "toilet", "study", "puja", "room", "dress"}   # as in blender/photos.py
 
 
 def run_blender(cmd, log, on_line):

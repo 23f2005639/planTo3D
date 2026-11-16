@@ -13,7 +13,7 @@ argv = sys.argv[sys.argv.index("--") + 1:]
 JOB = os.path.abspath(argv[0])
 SAMPLES = int(argv[argv.index("--samples") + 1]) if "--samples" in argv else 128
 RES = [int(v) for v in argv[argv.index("--res") + 1].split("x")] if "--res" in argv else [1920, 1080]
-ROOMS = {"bedroom", "living", "dining", "kitchen", "toilet", "study", "puja", "room", "dress", "balcony"}
+ROOMS = {"bedroom", "living", "dining", "kitchen", "toilet", "study", "puja", "room", "dress"}
 EYE = 1.5                                         # metres above the floor
 
 meta = json.load(open(os.path.join(JOB, "meta.json")))
@@ -46,7 +46,7 @@ def best_view(r, z, hero):
     4 m wins and the camera looks between it and the room centre; otherwise the spot that sees farthest.
     -> (position, target) or None"""
     x0, x1, y0, y1 = r
-    c = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z + 1.0))
+    c = Vector(((x0 + x1) / 2, (y0 + y1) / 2, z + (1.0 if hero else EYE - 0.25)))     # an empty room: look level
     t = c if hero is None else Vector((hero[0], hero[1], z + 0.8)).lerp(c, 0.35)
     i = 0.35
     spots = [(x, y) for x in (x0 + i, x1 - i) for y in (y0 + i, y1 - i)] + \
