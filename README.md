@@ -2,7 +2,9 @@
 
 **Floor plan PDF in. Furnished, walkable 3D house out.** No AI model and no LLM: every step is geometry, rules and Blender.
 
-![Walking through a house built from a plan](docs/walk.png)
+<a href="docs/demo.mp4"><img src="docs/demo.gif" alt="Walking through the house built from the sample plan" width="100%"></a>
+
+<sub>Shown at 2× speed. <a href="docs/demo.mp4">Watch the full video (MP4, 28 s)</a>, recorded with the walkthrough's own Record button.</sub>
 
 | Upload | Review the detected plan |
 |---|---|
