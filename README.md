@@ -194,7 +194,7 @@ assets/            downloaded materials (not in git)
 ## Tests
 
 ```bash
-tests/run_all.sh                                   # detector on the sample, furniture clashes, stair and wall walking
+tests/run_all.sh                                   # detector on the sample, server guards, furniture clashes, stair and wall walking
 CHROME=/path/to/chromium node tests/test_site.mjs examples/sample_plan.pdf http://127.0.0.1:8080
 ```
 

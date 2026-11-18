@@ -16,11 +16,12 @@ MAX_UPLOAD = 200 * 1024 * 1024       # plans are small; recordings sent for MP4 
 BUILD_TIMEOUT = 2 * 3600        # seconds; a high-quality build of a large house takes well under an hour
 ID = re.compile(r"^[a-f0-9]{12}$")
 sys.path.insert(0, HERE)
-import catalog, detect, fetch_assets, vector  # noqa: E402
+import catalog, detect, fetch_assets  # noqa: E402
 
 os.makedirs(JOBS, exist_ok=True)
 builds = queue.Queue()
-lock = threading.Lock()
+lock = threading.RLock()        # reentrant: request handlers hold it around status() to check and set a stage in one step
+BUSY = ("uploaded", "detecting", "queued", "building")
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
          ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".glb": "model/gltf-binary",
          ".wasm": "application/wasm", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".hdr": "application/octet-stream",
@@ -82,6 +83,7 @@ def fetch_materials():
         assets_job["failed"] = [str(e)]
     finally:
         assets_job["running"] = False
+        thumbs_job["tried"] = False          # the furniture pictures can be drawn now
 
 
 def export_blend(jid):
@@ -107,7 +109,7 @@ def export_blend(jid):
 
 # ------------------------------------------------------------------ your own furniture models
 CUSTOM, THUMBS = os.path.join(fetch_assets.ROOT, "custom"), os.path.join(fetch_assets.ROOT, "thumbs")
-thumbs_job = dict(running=False, again=False)
+thumbs_job = dict(running=False, again=False, tried=False)
 
 
 def render_thumbs():
@@ -136,12 +138,13 @@ def refresh_thumbs():
         if thumbs_job["running"]:
             thumbs_job["again"] = True
             return
-        thumbs_job["running"] = True
+        thumbs_job.update(running=True, tried=True)
     threading.Thread(target=render_thumbs, daemon=True).start()
 
 
 def furniture():
-    if not thumbs_job["running"] and not all(os.path.exists(os.path.join(THUMBS, f"{fn}.png")) for fn in catalog.CATALOG):
+    # drawn once on its own; after that only a new or removed model draws them again (a render that fails must not loop)
+    if not thumbs_job["tried"] and not all(os.path.exists(os.path.join(THUMBS, f"{fn}.png")) for fn in catalog.CATALOG):
         refresh_thumbs()
     return dict(rendering=thumbs_job["running"], items=[
         dict(fn=fn, label=label, custom=os.path.exists(os.path.join(CUSTOM, f"{fn}.glb")),
@@ -154,23 +157,19 @@ def run_detect(jid):
     pdf = os.path.join(d, "source.pdf")
     try:
         status(jid, stage="detecting", progress=5, message="Reading the drawing")
-        n = vector.page_count(pdf)
-        for k in range(1, min(n, 6) + 1):        # page images for the review screen (100 dpi = 100/72 px per pt)
-            subprocess.run(["pdftocairo", "-png", "-r", "100", "-f", str(k), "-l", str(k), "-singlefile", pdf,
-                            os.path.join(d, f"page-{k}")], check=True, timeout=120)
-        p1 = vector.read_page(pdf, 1)
-        if len(p1["segs"]) < 150:
-            raise detect.PlanError("This PDF has almost no vector lines - it looks like a scan or photo. "
-                                   "Please export the plan from AutoCAD / your CAD tool as a PDF.")
         importlib.reload(detect)          # pick up detector fixes without restarting the server
         plan = detect.detect(pdf)
+        for k in sorted({f["page"] for f in plan["floors"]}):     # page images for the review screen (100 dpi = 100/72 px per pt)
+            subprocess.run(["pdftocairo", "-png", "-r", "100", "-f", str(k), "-l", str(k), "-singlefile", pdf,
+                            os.path.join(d, f"page-{k}")], check=True, timeout=120)
         with open(os.path.join(d, "plan.json"), "w") as fh:
             json.dump(plan, fh)
         status(jid, stage="detected", progress=100, message="Plan detected - please review",
                floors=[f["name"] for f in plan["floors"]], scale_source=plan["scale_source"])
     except Exception as e:
-        traceback.print_exc()
         known = isinstance(e, detect.PlanError)
+        if not known:                     # a known one is the drawing's fault, already said in plain words
+            traceback.print_exc()
         status(jid, stage="failed", message=str(e) if known else "This drawing could not be read. Is it a floor plan exported from a CAD tool?")
 
 
@@ -361,9 +360,10 @@ class H(BaseHTTPRequestHandler):
         p = urlparse(self.path).path
         m = re.match(r"^/api/jobs/([a-f0-9]{12})$", p)
         if m and os.path.isdir(jdir(m.group(1))):
-            if (read_status(m.group(1)) or {}).get("stage") in ("building", "queued"):
-                return self.send(409, {"error": "This plan is being built. Delete it when the build has finished."})
-            shutil.rmtree(jdir(m.group(1)))
+            with lock:
+                if (read_status(m.group(1)) or {}).get("stage") in BUSY:
+                    return self.send(409, {"error": "This plan is being read or built. Delete it when that has finished."})
+                shutil.rmtree(jdir(m.group(1)))
             return self.send(200, {"ok": True})
         m = re.match(r"^/api/furniture/(\w+)$", p)
         if m and m.group(1) in catalog.CATALOG:               # back to the built-in item
@@ -426,35 +426,38 @@ class H(BaseHTTPRequestHandler):
                 jid, what = m.groups()
                 if what == "export":
                     return self.send(200, {"url": export_blend(jid)})
-                st = read_status(jid) or {}
-                if st.get("stage") in ("building", "queued"):
-                    return self.send(409, {"error": "a build is already running"})
-                if what == "plan":
-                    plan = json.loads(self.body())
-                    if not isinstance(plan, dict) or not isinstance(plan.get("floors"), list) or not plan["floors"]:
-                        return self.send(400, {"error": "invalid plan"})
-                    with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
-                        json.dump(plan, fh)
-                    return self.send(200, {"ok": True})
                 req = json.loads(self.body() or b"{}")
-                q = req.get("quality") if req.get("quality") in ("draft", "high") else "high"
-                status(jid, stage="queued", progress=0, message=f"Waiting for the 3D builder ({builds.qsize()} ahead)")
-                builds.put((jid, q, req.get("photos") is True))
+                if not isinstance(req, dict):
+                    raise ValueError("expected a JSON object")
+                with lock:               # checked and set in one step: two quick clicks must not queue two builds
+                    if (read_status(jid) or {}).get("stage") in BUSY:
+                        return self.send(409, {"error": "this plan is being read or built"})
+                    if what == "plan":
+                        if not isinstance(req.get("floors"), list) or not req["floors"]:
+                            return self.send(400, {"error": "invalid plan"})
+                        with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
+                            json.dump(req, fh)
+                        return self.send(200, {"ok": True})
+                    q = req.get("quality") if req.get("quality") in ("draft", "high") else "high"
+                    status(jid, stage="queued", progress=0, message=f"Waiting for the 3D builder ({builds.qsize()} ahead)")
+                    builds.put((jid, q, req.get("photos") is True))
                 return self.send(200, {"ok": True})
             self.send(404, {"error": "not found"})
         except (ValueError, json.JSONDecodeError) as e:
             self.send(400, {"error": str(e)})
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except Exception:              # anything else: still answer, so the page can say what failed
             traceback.print_exc()
-            self.send(500, {"error": "Blender could not write the file"})
+            self.send(500, {"error": "The server could not do that - see its log."})
 
 
 if __name__ == "__main__":
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8080
     host = sys.argv[sys.argv.index("--host") + 1] if "--host" in sys.argv else "127.0.0.1"
-    for jid in os.listdir(JOBS):           # builds interrupted by a restart
+    for jid in os.listdir(JOBS):           # work interrupted by a restart: reading starts again, a build is pressed again
         st = read_status(jid) if ID.match(jid) else None
-        if st and st.get("stage") in ("building", "queued", "detecting"):
+        if st and st.get("stage") in ("uploaded", "detecting"):
+            threading.Thread(target=run_detect, args=(jid,), daemon=True).start()
+        elif st and st.get("stage") in BUSY:
             status(jid, stage="failed", message="interrupted by a server restart - press Build again")
     threading.Thread(target=builder, daemon=True).start()
     print(f"PlanTo3D on http://{host}:{port}", flush=True)

@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 set -e
 python3 tests/test_sample.py
 python3 tests/test_detect.py
+python3 tests/test_server.py
 python3 detect.py examples/sample_plan.pdf /tmp/planto3d_sample.json > /dev/null
 for p in /tmp/planto3d_sample.json jobs/*/plan.json; do
   [ -f "$p" ] || continue
