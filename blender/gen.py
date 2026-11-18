@@ -46,7 +46,6 @@ FLOOR_MAT = dict(dress="wood", bedroom="wood", toilet="bathtile", kitchen="marbl
                  garden="turf", open="pebbles", parking="pavers", yard="pavers", stair="stair", room="tile",
                  duct="concrete")
 OPEN_SKY = {"open", "garden", "yard"}      # no slab above these
-INDOOR = {"bedroom", "toilet", "kitchen", "living", "dining", "puja", "study", "store", "passage", "room", "wash", "dress"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -358,7 +357,13 @@ def custom(it):
     if it["fn"] not in CATALOG or not os.path.exists(path) or x1 - x0 < 0.1 or y1 - y0 < 0.1:
         return False
     before = set(bpy.data.objects)
-    bpy.ops.import_scene.gltf(filepath=path)        # shortcut: imported once per item, fine for a house; cache if plans grow huge
+    try:
+        bpy.ops.import_scene.gltf(filepath=path)    # shortcut: imported once per item, fine for a house; cache if plans grow huge
+    except RuntimeError as e:                        # a broken file: the built-in item stands in for it
+        print("CUSTOM MODEL FAILED", it["fn"], e, flush=True)
+        for o in set(bpy.data.objects) - before:
+            bpy.data.objects.remove(o)
+        return False
     new = [o for o in bpy.data.objects if o not in before]
     bpy.context.view_layer.update()
     pts = [o.matrix_world @ Vector(c) for o in new if o.type == "MESH" for c in o.bound_box]
@@ -529,7 +534,7 @@ for k, f in enumerate(floors):
         curtains(f, items)
     # lamps (emissive panel + area light for the bake) in roofed rooms
     for zn in f["rooms"]:
-        if zn["type"] not in INDOOR and zn["type"] not in ("balcony", "parking", "stair"):
+        if zn["type"] not in furnish.INDOOR and zn["type"] not in ("balcony", "parking", "stair"):
             continue
         x0, x1, y0, y1 = furnish.max_rect(zn["rects"]) or max(zn["rects"], key=lambda r: (r[1] - r[0]) * (r[3] - r[2]))
         if (x1 - x0) * (y1 - y0) < 6:
@@ -606,7 +611,7 @@ sun.rotation_euler = (math.radians(52), 0, math.radians(-28))
 collection("lights").objects.link(sun)
 for cx, cy, zz, a, typ in LAMPS:
     L = bpy.data.lights.new("lamp", "AREA")
-    L.energy = (14 if typ in INDOOR else 8) * a * lib.F * lib.F
+    L.energy = (14 if typ in furnish.INDOOR else 8) * a * lib.F * lib.F
     L.size, L.shape = 0.6, "SQUARE"
     L.color = (1.0, 0.9, 0.78)
     o = bpy.data.objects.new("lamp", L)

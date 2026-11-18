@@ -960,15 +960,22 @@ def detect_floor(f, T, s, phr, lines, hatch, A, zone_lines, cuts=()):
 
 
 def detect(pdf):
-    pages = []
+    pages, lines = [], 0
     for k in range(1, vector.page_count(pdf) + 1):
+        page = vector.read_page(pdf, k)
+        lines = max(lines, len(page["segs"]))
+        if len(page["segs"]) < 150:      # a cover sheet or notes: too few lines for a plan
+            continue
         try:
-            pg = detect_page(vector.read_page(pdf, k))
+            pg = detect_page(page)
         except PlanError:
             continue
         for f in pg["floors"]:
             f["page"] = k
         pages.append(pg)
+    if lines < 150:          # any page of a CAD plan has thousands of lines; a cover sheet before the plans does not count
+        raise PlanError("This PDF has almost no vector lines - it looks like a scan or photo. "
+                        "Please export the plan from AutoCAD / your CAD tool as a PDF.")
     if not pages:
         raise PlanError("No floor plan was found in this PDF. The drawing needs double-line walls and room names.")
     floors = [f for p in pages for f in p["floors"]]

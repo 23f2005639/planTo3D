@@ -100,6 +100,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) toggleMap();
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });      // a key let go in another window never sends keyup here
 const canvas = renderer.domElement;
 $('overlay').addEventListener('click', () => {
   if (matchMedia('(pointer: coarse)').matches) { $('overlay').style.display = 'none'; return; }

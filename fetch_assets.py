@@ -56,13 +56,15 @@ def fetch(progress=lambda done, total, name: None, tour=False):
             if kind == "model":
                 g = f["gltf"]["1k"]["gltf"]
                 d = os.path.join(ROOT, "models", name)
-                save(g["url"], os.path.join(d, os.path.basename(g["url"])))
                 for rel, inc in g["include"].items():
                     save(inc["url"], os.path.join(d, rel))
-            elif kind == "texture":
+                save(g["url"], os.path.join(d, os.path.basename(g["url"])))     # last: missing() counts the model by this file
+            elif kind == "texture":       # into name.part/, renamed when whole: missing() counts the texture by its folder
+                d = os.path.join(ROOT, "textures", name)
                 for key, short in (("Diffuse", "diff"), ("nor_gl", "nor"), ("Rough", "rough")):
                     if key in f:
-                        save(f[key]["1k"]["jpg"]["url"], os.path.join(ROOT, "textures", name, f"{short}.jpg"))
+                        save(f[key]["1k"]["jpg"]["url"], os.path.join(d + ".part", f"{short}.jpg"))
+                os.replace(d + ".part", d)
             elif name == SKY:
                 save(f["hdri"]["1k"]["hdr"]["url"], os.path.join(ROOT, "hdri", "sky.hdr"))
             else:

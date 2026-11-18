@@ -44,7 +44,7 @@ Flow: upload -> `run_detect` -> `plan.json` -> review page edits it -> `POST …
 ## Tests: run them before you finish
 
 ```bash
-tests/run_all.sh                    # detector on the sample, furniture clashes, stair and wall walking
+tests/run_all.sh                    # detector on the sample, server guards, furniture clashes, stair and wall walking
 python3 tests/test_sample.py        # the sample must be read exactly
 CHROME=/path/to/chromium node tests/test_site.mjs examples/sample_plan.pdf http://127.0.0.1:8080
 ```
