@@ -3,7 +3,7 @@ Standard library only. Run: python3 server.py [--port 8080] [--host 127.0.0.1] [
 Builds run one at a time in Blender (GPU) in a background thread; progress is polled by the pages.
 --cors lets pages on another site call the API from the browser (ORIGIN such as https://example.com, or *).
 There is no login: run it on a trusted network, or behind your own backend or proxy."""
-import importlib, json, os, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
+import importlib, json, os, posixpath, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote
 
@@ -53,7 +53,7 @@ def read_status(jid):
 # ------------------------------------------------------------------ system check and the materials download
 _blender = None                 # Blender's version, read once ("" = not found)
 assets_job = dict(running=False, done=0, total=0, failed=[])
-export_lock = threading.Lock()
+export_lock, site_lock = threading.Lock(), threading.Lock()      # the site zip takes a second: it must not wait for a Blender pack
 
 
 def system():
@@ -105,6 +105,59 @@ def export_blend(jid):
             os.remove(tmp)
             os.replace(out + ".part", out)
     return f"/jobs/{jid}/house_blender.zip"
+
+
+def three_files():
+    """the three.js files the viewer loads: what view.js and walk.js import from three, and what those import in turn"""
+    def deps(text, here):
+        for s in re.findall(r"\b(?:from|import)\s*['\"]([^'\"]+)['\"]", text):
+            if s == "three":
+                yield "build/three.module.js"
+            elif s.startswith("three/addons/"):
+                yield "examples/jsm/" + s[13:]
+            elif s.startswith(".") and here is not None:
+                yield posixpath.normpath(posixpath.join(here, s))
+    todo, seen = [f for w in ("view.js", "walk.js") for f in deps(open(os.path.join(WEB, w)).read(), None)], set()
+    while todo:
+        f = todo.pop()
+        if f not in seen and os.path.isfile(os.path.join(THREE, f)):      # (an example in a doc comment may name a file that is not there)
+            seen.add(f)
+            todo += deps(open(os.path.join(THREE, f)).read(), posixpath.dirname(f))
+    # DRACOLoader fetches its decoder at run time (the WebAssembly one, as every browser with import maps has it)
+    return sorted(seen) + ["examples/jsm/libs/draco/draco_wasm_wrapper.js", "examples/jsm/libs/draco/draco_decoder.wasm"]
+
+
+def export_site(jid):
+    """jobs/<id>/house_site.zip: the walkthrough as a static website for any web host, without this server (made once
+    per build). Only the house itself leaves the job folder: never the client's PDF, the plan or the logs."""
+    d = jdir(jid)
+    glb, out = os.path.join(d, "house.glb"), os.path.join(d, "house_site.zip")
+    if not os.path.exists(glb):
+        raise ValueError("build the 3D house first")
+    srcs = [glb, os.path.join(d, "meta.json")] + [os.path.join(WEB, f) for f in ("view.html", "view.js", "walk.js", "style.css")]
+    with site_lock:
+        if not os.path.exists(out) or os.path.getmtime(out) < max(map(os.path.getmtime, srcs)):     # a new build or a new viewer
+            meta = json.load(open(os.path.join(d, "meta.json")))
+            house = ["meta.json", "house.glb"] + [os.path.basename(f) for f in (meta.get("lightmaps") or {}).values()]
+            # view.html with three.js next to it; view.js finds no ?job= and reads the house from ./house/
+            page = open(os.path.join(WEB, "view.html")).read().replace('"/three/', '"./three/')
+            with zipfile.ZipFile(out + ".part", "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("index.html", page)
+                for f in ("view.js", "walk.js", "style.css"):
+                    z.write(os.path.join(WEB, f), f)
+                for f in three_files():
+                    z.write(os.path.join(THREE, f), "three/" + f)
+                for f in house:          # already compressed (Draco, WebP)
+                    z.write(os.path.join(d, f), "house/" + f, zipfile.ZIP_STORED)
+                z.writestr("README.txt", "3D walkthrough - made by PlanTo3D.\n\n"
+                           "Put this folder on any static web host (Netlify, GitHub Pages, your own server) and open index.html.\n"
+                           "To try it on your computer, run a web server in this folder, for example\n"
+                           "    python3 -m http.server 8000\n"
+                           "and open http://localhost:8000/ . Opening index.html straight from the disk does not work:\n"
+                           "browsers do not load the viewer's modules from file:// pages.\n\n"
+                           "Viewer: three.js (MIT). Textures and models are CC0, from polyhaven.com.\n")
+            os.replace(out + ".part", out)
+    return f"/jobs/{jid}/house_site.zip"
 
 
 # ------------------------------------------------------------------ your own furniture models
@@ -379,11 +432,15 @@ class H(BaseHTTPRequestHandler):
                 status(jid, name=name, stage="uploaded", progress=0, message="Uploaded", created=time.time())
                 threading.Thread(target=run_detect, args=(jid,), daemon=True).start()
                 return self.send(200, {"id": jid})
-            m = re.match(r"^/api/jobs/([a-f0-9]{12})/(plan|build|export)$", p)
+            m = re.match(r"^/api/jobs/([a-f0-9]{12})/(plan|build|export|site)$", p)
             if m and os.path.isdir(jdir(m.group(1))):
                 jid, what = m.groups()
                 if what == "export":
                     return self.send(200, {"url": export_blend(jid)})
+                if what == "site":
+                    if (read_status(jid) or {}).get("stage") in BUSY:      # half old, half new files: and it would be kept
+                        return self.send(409, {"error": "this plan is being read or built"})
+                    return self.send(200, {"url": export_site(jid)})
                 req = json.loads(self.body() or b"{}")
                 if not isinstance(req, dict):
                     raise ValueError("expected a JSON object")

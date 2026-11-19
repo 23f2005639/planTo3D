@@ -94,6 +94,7 @@ python server.py
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
 | **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |
+| **Website** | The walkthrough as a static website in a zip, to share without this server (see below) |
 | **Furniture models in the review page** | **Change furniture models** opens the furniture page in a window, so you can swap a model and then build |
 
 ### Your own furniture
@@ -160,6 +161,7 @@ sequenceDiagram
 | `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms |
 | `POST /api/jobs/{id}/build` | Body `{ "quality": "draft" \| "high" }`. Builds run one at a time |
 | `POST /api/jobs/{id}/export` | Packs the Blender file. Returns `{ url }` of the zip |
+| `POST /api/jobs/{id}/site` | Packs the walkthrough as a static website. Returns `{ url }` of the zip |
 | `GET /web/view.html?job={id}` | The walkthrough. `&embed` hides the link back to the upload page |
 | `GET /web/edit.html?job={id}` | The review page |
 | `GET /api/jobs` | The 30 most recent plans |
@@ -167,6 +169,14 @@ sequenceDiagram
 | `GET /api/furniture` | Replaceable items; `POST /api/furniture/{name}` (a `.glb`) replaces one, `DELETE` restores it |
 
 To let people correct the plan first, show `/web/edit.html?job={id}` in the iframe instead of building straight away.
+
+### Share the walkthrough without the server
+
+The server has no login, so do not open it to the internet for clients. Instead press **Website** in the walkthrough
+(or `POST /api/jobs/{id}/site`): the zip holds the viewer, the three.js files it needs and the house, nothing else
+(not the PDF, not the plan). Unzip it onto any static host (Netlify, GitHub Pages, your own web server) and send the
+link. To try it locally, run `python3 -m http.server` in the unzipped folder; opening `index.html` straight from the
+disk does not load the viewer's modules. Recordings there are saved as the browser makes them (MP4 or WebM).
 
 ## Project layout
 

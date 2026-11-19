@@ -1,7 +1,7 @@
 """The server's guards, without Blender: files outside the web folders stay hidden, a plan that is being read or built
 cannot be changed or deleted, bad request bodies get an answer, and a cover sheet before the plan is not taken for a
 scan.  python3 tests/test_server.py"""
-import json, os, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request
+import json, os, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -43,8 +43,23 @@ try:
     assert call("POST", f"/api/jobs/{done}/plan", b'{"floors": [{"name": "G"}]}')[0] == 200
     assert json.load(open(os.path.join(server.jdir(done), "plan.json")))["floors"][0]["name"] == "G"
     assert call("POST", f"/api/jobs/{done}/export")[0] == 400           # nothing built yet
+    assert call("POST", f"/api/jobs/{done}/site")[0] == 400             # nothing built yet
     assert call("DELETE", f"/api/jobs/{done}")[0] == 200 and not os.path.exists(server.jdir(done))
     print("ok   server: hidden files, busy plans, bad bodies")
+
+    # the website zip: the viewer, the three.js it loads and the house, and nothing else from the job folder
+    built = job("done")
+    for f, data in (("meta.json", b'{"lightmaps": {"bake_level_0": "lm_bake_level_0.webp"}}'), ("house.glb", b"glTF"),
+                    ("lm_bake_level_0.webp", b"RIFF"), ("source.pdf", b"%PDF"), ("plan.json", b"{}")):
+        open(os.path.join(server.jdir(built), f), "wb").write(data)
+    code, body = call("POST", f"/api/jobs/{built}/site")
+    assert code == 200, body
+    names = zipfile.ZipFile(os.path.join(server.jdir(built), "house_site.zip")).namelist()
+    for f in ("index.html", "view.js", "walk.js", "three/build/three.module.js", "three/examples/jsm/libs/draco/draco_decoder.wasm",
+              "house/meta.json", "house/house.glb", "house/lm_bake_level_0.webp"):
+        assert f in names, f
+    assert not [f for f in names if f.endswith(("source.pdf", "plan.json", "status.json"))], names
+    print("ok   server: website zip")
 
     # a title sheet with no drawing before the plan: the plan on page 2 is found, and its page is the one drawn
     cover = os.path.join(server.JOBS, "cover.pdf")
