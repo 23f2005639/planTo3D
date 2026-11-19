@@ -37,6 +37,7 @@ With `"photos": true` (beta) the server then runs `photos.py`, which writes `pho
 
 - **Units.** Plan JSON and all furniture code are in feet. `meta.json` and the browser are in metres.
 - **Rotation.** `rot` 0 = the item's front faces -y and its back is on +y; 90 = front +x; 180 = +y; 270 = -x.
+- **Furniture items** `{fn, args, kw, box, solid, room}`: a floor with an `items` list (written by the review page's Furniture tool) is built with exactly that list, `[]` = empty rooms; without the key the rules in `furnish.py` decide.
 - **Rectangles** are `[x0, x1, y0, y1]`. A wall is `[x0, x1, y0, y1, low]` (`low` 1 = parapet height).
 - **Stages** of a job: `uploaded`, `detecting`, `detected`, `queued`, `building`, `done`, `failed` (in `jobs/<id>/status.json`).
 - Messages a person will read are raised as `detect.PlanError`. Anything else is logged and shown as a generic message.
@@ -57,7 +58,7 @@ If you change `examples/make_sample.py`, run it to rewrite the PDF and keep its 
 
 ## How to change things
 
-- **A new furniture item:** write the builder in `blender/gen.py` (or `lib.py`), add it to `CALLS`, place it from a rule in `furnish.py` with its footprint `box`. Add it to `catalog.py` only if people should be able to replace it.
+- **A new furniture item:** write the builder in `blender/gen.py` (or `lib.py`), add it to `CALLS` and to `ITEM_FNS` in `server.py` (what the review page may send), place it from a rule in `furnish.py` with its footprint `box`. Add it to `catalog.py` only if people should be able to replace it.
 - **A new room type:** add its keywords to `ROOM_TYPES` in `detect.py`, a rule in `furnish.py`, a floor material in `gen.py` (`FLOOR_MAT`, `INDOOR`), and a colour in `web/edit.js` (`TYPES`, `ZCOL`).
 - **A detector fix:** make it general, not a special case for one drawing. Check the sample still passes. The scores on real drawings need private fixtures (`PLANTO3D_FIXTURES`) that are not in the repository.
 - **A new API call:** add it in `server.py` (`do_GET` / `do_POST` / `do_DELETE`), and to the table in `README.md`.

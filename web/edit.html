@@ -21,6 +21,9 @@
   .tools button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
   .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
   select, input[type=text], input[type=number] { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+  .sw { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); cursor: pointer; padding: 0; }
+  .sw.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #wc { width: 34px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
   .legend span { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 12px; }
   .legend i { width: 12px; height: 8px; display: inline-block; border-radius: 2px; }
   #bfun { color: var(--accent); font-weight: 600; margin: 10px 0 0; display: flex; align-items: center; }
@@ -64,6 +67,7 @@
         <button data-t="door">Add door</button>
         <button data-t="window">Add window</button>
         <button data-t="scale">Set scale</button>
+        <button data-t="furniture">Furniture</button>
         <button id="undo">Undo</button>
       </div>
       <p class="muted" style="font-size:12px;margin:6px 0 0" id="hint">Click a wall, opening or room to edit it, or another floor plan to switch to it. Drag to pan, scroll to zoom.</p>
@@ -78,6 +82,17 @@
       <h3>Floor</h3>
       <div class="row"><span>Name</span><input type="text" id="fname" style="width:150px"></div>
       <div class="row" style="margin-top:6px"><span>Ceiling height (ft)</span><input type="number" id="fh" min="8" max="14" step="0.5" style="width:70px"></div>
+    </div>
+    <div>
+      <h3>Wall paint</h3>
+      <div class="row" id="paint" style="margin-top:6px">
+        <button class="sw" data-c="#efe7da" title="Warm white" aria-label="Warm white"></button>
+        <button class="sw" data-c="#dcdcd8" title="Light grey" aria-label="Light grey"></button>
+        <button class="sw" data-c="#c3cdb4" title="Sage" aria-label="Sage"></button>
+        <button class="sw" data-c="#e2d0b0" title="Sand" aria-label="Sand"></button>
+        <button class="sw" data-c="#cddbe6" title="Pale blue" aria-label="Pale blue"></button>
+        <input type="color" id="wc" title="Any colour" aria-label="Wall colour">
+      </div>
     </div>
     <div class="legend">
       <span><i style="background:#e53935"></i>wall</span><span><i style="background:#d81bd8"></i>low wall</span>

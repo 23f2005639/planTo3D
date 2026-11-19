@@ -1,13 +1,14 @@
 """The server's guards, without Blender: files outside the web folders stay hidden, a plan that is being read or built
-cannot be changed or deleted, bad request bodies get an answer, and a cover sheet before the plan is not taken for a
-scan.  python3 tests/test_server.py"""
-import json, os, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request
+cannot be changed or deleted, bad request bodies get an answer, furniture from the review page reaches Blender only
+as known items with plain values, the website zip holds the viewer and the house only, and a cover sheet before the
+plan is not taken for a scan.  python3 tests/test_server.py"""
+import json, os, shutil, subprocess, sys, tempfile, threading, urllib.error, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path[:0] = [ROOT, os.path.join(ROOT, "examples")]
 import make_sample as M  # noqa: E402
-import server  # noqa: E402
+import detect, server  # noqa: E402
 
 server.JOBS = tempfile.mkdtemp()          # never touch the real jobs folder
 httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.H)
@@ -42,9 +43,61 @@ try:
     assert call("POST", f"/api/jobs/{done}/plan", b"not json")[0] == 400
     assert call("POST", f"/api/jobs/{done}/plan", b'{"floors": [{"name": "G"}]}')[0] == 200
     assert json.load(open(os.path.join(server.jdir(done), "plan.json")))["floors"][0]["name"] == "G"
+    # room finishes and wall colour reach Blender as material names and colours: only known values pass
+    plan = lambda room, **kw: json.dumps({"floors": [{"rooms": [room]}], **kw}).encode()
+    for bad in (plan({"floor": "lava"}), plan({"floor": ["wood"]}), plan({}, wall_color="red"), plan({}, wall_color="#12345g"),
+                plan({}, wall_color="#123456\n"), plan({}, wall_color=None)):
+        assert call("POST", f"/api/jobs/{done}/plan", bad)[0] == 400, bad
+    assert call("POST", f"/api/jobs/{done}/plan", plan({"floor": "wood"}, wall_color="#C3cdb4"))[0] == 200
+    saved = json.load(open(os.path.join(server.jdir(done), "plan.json")))
+    assert saved["floors"][0]["rooms"][0]["floor"] == "wood" and saved["wall_color"] == "#C3cdb4"
     assert call("POST", f"/api/jobs/{done}/export")[0] == 400           # nothing built yet
+    assert call("POST", f"/api/jobs/{done}/site")[0] == 400             # nothing built yet
     assert call("DELETE", f"/api/jobs/{done}")[0] == 200 and not os.path.exists(server.jdir(done))
-    print("ok   server: hidden files, busy plans, bad bodies")
+    print("ok   server: hidden files, busy plans, bad bodies, room finishes")
+
+    # furniture: the rules' list until the review page sends its own; an empty list is an empty floor
+    jid = job("detected")
+    assert call("GET", f"/api/jobs/{jid}/furniture")[0] == 404          # not read yet
+    plan = detect.detect(os.path.join(ROOT, "examples", "sample_plan.pdf"))
+    json.dump(plan, open(os.path.join(server.jdir(jid), "plan.json"), "w"))
+    code, out = call("GET", f"/api/jobs/{jid}/furniture")
+    out = json.loads(out)
+    assert code == 200 and len(out["floors"]) == len(plan["floors"]) and "bed" in out["catalog"], out
+    rules = out["floors"][0]
+    assert {"bed", "kitchen_run", "wall_cab2"} <= {it["fn"] for it in rules}
+    post = lambda p: call("POST", f"/api/jobs/{jid}/plan", json.dumps(p).encode())[0]
+    plan["floors"][0]["items"] = rules                                   # the rules' own items pass as they are
+    assert post(plan) == 200
+    plan["floors"][0]["items"] = []
+    assert post(plan) == 200 and json.loads(call("GET", f"/api/jobs/{jid}/furniture")[1])["floors"][0] == []
+    bed = next(it for it in rules if it["fn"] == "bed")
+    for bad in (dict(bed, fn="model", args=["../../x", 1, 1, 0]), dict(bed, fn="nope"), dict(bed, args=[1, "../x", 0]),
+                dict(bed, args=[1, float("nan"), 0]), dict(bed, box=[0, 1, 2]), dict(bed, kw={"w": [5]}),
+                dict(bed, kw={"a/b": 1}), dict(bed, kw={"m": "rug\n"}), dict(bed, kw=None), dict(bed, fn=[]), "bed"):
+        plan["floors"][0]["items"] = [bad]
+        assert post(plan) == 400, bad
+    plan["floors"][0]["items"] = [bed] * 401
+    assert post(plan) == 400
+    plan["floors"][0]["items"] = [dict(bed, args=[1, 2, 90])]
+    assert post(plan) == 200
+    plan["furnish"] = False
+    assert post(plan) == 200 and json.loads(call("GET", f"/api/jobs/{jid}/furniture")[1])["floors"] == [[]] * len(plan["floors"])
+    print("ok   server: furniture lists, item checks")
+
+    # the website zip: the viewer, the three.js it loads and the house, and nothing else from the job folder
+    built = job("done")
+    for f, data in (("meta.json", b'{"lightmaps": {"bake_level_0": "lm_bake_level_0.webp"}}'), ("house.glb", b"glTF"),
+                    ("lm_bake_level_0.webp", b"RIFF"), ("source.pdf", b"%PDF"), ("plan.json", b"{}")):
+        open(os.path.join(server.jdir(built), f), "wb").write(data)
+    code, body = call("POST", f"/api/jobs/{built}/site")
+    assert code == 200, body
+    names = zipfile.ZipFile(os.path.join(server.jdir(built), "house_site.zip")).namelist()
+    for f in ("index.html", "view.js", "walk.js", "three/build/three.module.js", "three/examples/jsm/libs/draco/draco_decoder.wasm",
+              "house/meta.json", "house/house.glb", "house/lm_bake_level_0.webp"):
+        assert f in names, f
+    assert not [f for f in names if f.endswith(("source.pdf", "plan.json", "status.json"))], names
+    print("ok   server: website zip")
 
     # a title sheet with no drawing before the plan: the plan on page 2 is found, and its page is the one drawn
     cover = os.path.join(server.JOBS, "cover.pdf")

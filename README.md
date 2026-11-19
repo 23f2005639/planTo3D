@@ -87,17 +87,22 @@ python server.py
 | | |
 |---|---|
 | **Review before building** | Detected walls, doors, windows and rooms drawn over your PDF. Click to change or delete, draw walls, add doors and windows, set the scale |
+| **Floor finish and wall paint** | Pick a room's floor (marble, wood, tiles, bathroom tiles, terracotta, concrete; Auto follows the room type) and one wall colour for the house. Saved in the plan as `room.floor` and `wall_color` (`#rrggbb`) |
 | **Furniture on or off** | Untick **Furniture** for empty rooms |
+| **Move your furniture** | The **Furniture** tool on the review page shows each item: drag to move, turn it 90°, delete it, or add one from the list |
 | **Time estimate** | The build box shows about how long is left, learned from earlier builds on the same machine |
 | **Walkthrough** | W A S D and mouse on desktop, two thumbs on a phone. Starts at the entrance side of the plan |
 | **Top view** (T) | The house from above, one storey at a time |
-| **Map** (M) | Room names, stairs, where you stand and look |
+| **Map** (M) | Room names, stairs, where you stand and look; the big map adds each room's size and area |
+| **Measure** (N) | Click or tap two points on the house for the distance in metres and feet-inches (drag to look around meanwhile); works in top view too. The line and label are drawn in the 3D view, so screenshots and recordings show them |
 | **Screenshot** (P) | PNG of about 4K size |
 | **Record** (R) | Video of your walk as MP4 (browsers that record WebM are converted on the server; needs ffmpeg) |
+| **Tour** (G) | Walks itself from the entrance through every room and up the stairs, looks around in each, and records it as one video. Any key or click stops it |
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
 | **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |
 | **Realistic photos (BETA)** | Tick **Realistic photos** on the review page: after the build, Blender's Cycles engine renders a photo of every room (about 40 s per room on an RTX 3050). **Photos** in the walkthrough shows them. The camera spot is chosen automatically and can frame unusual rooms badly |
+| **Website** | The walkthrough as a static website in a zip, to share without this server (see below) |
 | **Furniture models in the review page** | **Change furniture models** opens the furniture page in a window, so you can swap a model and then build |
 
 ### Your own furniture
@@ -161,9 +166,11 @@ sequenceDiagram
 | `POST /api/upload` | Body: the PDF. Header `X-Filename`. Returns `{ id }` and starts detection |
 | `GET /api/jobs/{id}` | `{ stage, progress, message, floors, eta_left }`. Stages: `detecting`, `detected`, `queued`, `building`, `done`, `failed` |
 | `GET /jobs/{id}/plan.json` | The detected plan (feet): walls, openings, rooms, stairs per storey |
-| `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms |
+| `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms. A floor's `items` list (furniture placed on the review page) replaces the rules for that floor |
+| `GET /api/jobs/{id}/furniture` | `{ floors, catalog }`: each floor's furniture items (its own `items`, else the rules' choice) and the items that can be added |
 | `POST /api/jobs/{id}/build` | Body `{ "quality": "draft" \| "high", "photos": true }`. Builds run one at a time. `photos` (beta): the job's `photos` list names the files in `/jobs/{id}/photos/` |
 | `POST /api/jobs/{id}/export` | Packs the Blender file. Returns `{ url }` of the zip |
+| `POST /api/jobs/{id}/site` | Packs the walkthrough as a static website. Returns `{ url }` of the zip |
 | `GET /web/view.html?job={id}` | The walkthrough. `&embed` hides the link back to the upload page |
 | `GET /web/edit.html?job={id}` | The review page |
 | `GET /api/jobs` | The 30 most recent plans |
@@ -171,6 +178,14 @@ sequenceDiagram
 | `GET /api/furniture` | Replaceable items; `POST /api/furniture/{name}` (a `.glb`) replaces one, `DELETE` restores it |
 
 To let people correct the plan first, show `/web/edit.html?job={id}` in the iframe instead of building straight away.
+
+### Share the walkthrough without the server
+
+The server has no login, so do not open it to the internet for clients. Instead press **Website** in the walkthrough
+(or `POST /api/jobs/{id}/site`): the zip holds the viewer, the three.js files it needs and the house, nothing else
+(not the PDF, not the plan). Unzip it onto any static host (Netlify, GitHub Pages, your own web server) and send the
+link. To try it locally, run `python3 -m http.server` in the unzipped folder; opening `index.html` straight from the
+disk does not load the viewer's modules. Recordings there are saved as the browser makes them (MP4 or WebM).
 
 ## Project layout
 

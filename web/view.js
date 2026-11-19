@@ -4,11 +4,12 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as walk from '/web/walk.js';
+import * as walk from './walk.js';      // relative: the same file serves the downloaded website
 
 const $ = (id) => document.getElementById(id);
 const job = new URLSearchParams(location.search).get('job');
-const base = `/jobs/${job}/`;
+const site = !job;      // the downloaded website (no server): the house is in ./house/ and there is no /api
+const base = site ? './house/' : `/jobs/${job}/`;
 const WALK = 1.5, RUN = 3.0;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -25,7 +26,7 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 4
 const env = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
 
 const meta = await fetch(base + 'meta.json').then((r) => r.json());
-const draco = new DRACOLoader().setDecoderPath('/three/examples/jsm/libs/draco/');
+const draco = new DRACOLoader().setDecoderPath((site ? '.' : '') + '/three/examples/jsm/libs/draco/');
 const gltf = await new GLTFLoader().setDRACOLoader(draco).loadAsync(base + 'house.glb', (e) => {
   if (e.total) $('status').textContent = `Loading model… ${Math.round(100 * e.loaded / e.total)}%`;
 });
@@ -91,29 +92,36 @@ function roomAt(lv, x, y) {
 // ---- player
 const p = { ...walk.entrance(meta), z: floors[0].z, yaw: 0, pitch: 0 };
 const keys = {};
-let locked = false, topView = false;
+let locked = false, topView = false, measuring = false;
 addEventListener('keydown', (e) => {
+  if (tour) { if (!e.repeat) stopTour(); return; }      // any key ends the tour (a held G only repeats)
   keys[e.code] = true;
+  if (e.code === 'KeyG' && !e.repeat) startTour();
   if (e.code === 'KeyT') toggleTop();
   if (e.code === 'KeyP' && !e.repeat) screenshot();
   if (e.code === 'KeyR' && !e.repeat) toggleRec();
   if (e.code === 'KeyM' && !e.repeat) toggleMap();
+  if (e.code === 'KeyN' && !e.repeat) setMeasure(!measuring);
+  if (e.code === 'Escape' && measuring) setMeasure(false);
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });      // a key let go in another window never sends keyup here
 const canvas = renderer.domElement;
+// back to walking: capture the mouse again, or looking around stays dead with nothing to click
+const capture = () => { if (!matchMedia('(pointer: coarse)').matches) canvas.requestPointerLock()?.catch?.(() => { if (!topView && !measuring) $('overlay').style.display = 'flex'; }); };
 $('overlay').addEventListener('click', () => {
   if (matchMedia('(pointer: coarse)').matches) { $('overlay').style.display = 'none'; return; }
   canvas.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
-  $('overlay').style.display = locked || topView ? 'none' : 'flex';
+  $('overlay').style.display = locked || topView || measuring || tour ? 'none' : 'flex';
+  if (locked && tour) document.exitPointerLock();      // (a lock asked for by leaving the top view lands late)
 });
 // the browser refused to capture the mouse: show the start screen, whose click captures it
-document.addEventListener('pointerlockerror', () => { if (!topView) $('overlay').style.display = 'flex'; });
+document.addEventListener('pointerlockerror', () => { if (!topView && !measuring && !tour) $('overlay').style.display = 'flex'; });
 addEventListener('mousemove', (e) => {
-  if (!locked) return;
+  if (tour || (!locked && !(measuring && !topView && e.buttons))) return;      // measuring frees the mouse: drag to look instead
   p.yaw -= e.movementX * 0.0022;
   p.pitch = Math.max(-1.4, Math.min(1.4, p.pitch - e.movementY * 0.0022));
 });
@@ -169,8 +177,7 @@ function toggleTop() {
   } else {
     orbit.enabled = false;
     showLevels(levels.length);
-    // back to walking: capture the mouse again, or looking around stays dead with nothing to click
-    if (!matchMedia('(pointer: coarse)').matches) canvas.requestPointerLock()?.catch?.(() => { $('overlay').style.display = 'flex'; });
+    if (!measuring) capture();
   }
   map.style.display = topView ? 'none' : 'block';
   $('cross').style.display = topView ? 'none' : 'block';
@@ -188,6 +195,64 @@ floors.forEach((f, i) => {
     if (r) { p.x = (r[0] + r[1]) / 2; p.y = (r[2] + r[3]) / 2; p.z = f.z; }
   };
   $('floors').appendChild(b);
+});
+
+// ---- tape measure (N): click or tap two points on the house. Line, ends and label are part of the 3D scene,
+// so a screenshot or video taken while measuring shows the measurement too.
+let tapeN = 0, downAt = null;
+const ray = new THREE.Raycaster();
+const ink = { color: 0xffd23f, depthTest: false, fog: false, toneMapped: false, transparent: true };   // seen through walls and furniture
+const tapeGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(6, 3));
+const tapeCv = Object.assign(document.createElement('canvas'), { width: 512, height: 96 });
+const tapeTex = new THREE.CanvasTexture(tapeCv);
+tapeTex.colorSpace = THREE.SRGBColorSpace;
+const tapeLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: tapeTex, depthTest: false, fog: false, toneMapped: false, sizeAttenuation: false }));
+tapeLabel.scale.set(0.24, 0.045, 1);      // a fixed size on screen, near or far
+tapeLabel.center.set(0.5, -0.15);         // just above the line
+const tape = new THREE.Group().add(new THREE.Line(tapeGeo, new THREE.LineBasicMaterial(ink)),
+  new THREE.Points(tapeGeo, new THREE.PointsMaterial({ ...ink, size: 7, sizeAttenuation: false })), tapeLabel);
+tape.children.forEach((o) => { o.renderOrder = 10; o.frustumCulled = false; });     // the points move: a cached bounding sphere would go stale
+tape.visible = false;
+scene.add(tape);
+function setMeasure(on) {
+  measuring = on;
+  tapeN = 0;
+  tape.visible = false;
+  $('measure').classList.toggle('on', on);
+  document.body.classList.toggle('measure', on);
+  if (on) { document.exitPointerLock?.(); $('overlay').style.display = 'none'; }     // the mouse must be free to point
+  else if (!topView) capture();
+}
+$('measure').onclick = () => setMeasure(!measuring);
+canvas.addEventListener('pointerdown', (e) => { if (e.isPrimary) downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('click', (e) => {
+  // orbiting (top view) and looking (touch) end in a click too: only a click that did not drag measures
+  if (!measuring || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, 1 - e.clientY / innerHeight * 2), camera);
+  const hit = ray.intersectObject(gltf.scene, true).find((h) => h.object.visible && !h.object.material.transparent);     // the ray also meets hidden storeys and window glass
+  if (!hit) return;
+  if (tapeN === 2) tapeN = 0;                      // a third click starts a new measurement
+  const pos = tapeGeo.attributes.position;
+  pos.setXYZ(tapeN++, hit.point.x, hit.point.y, hit.point.z);
+  pos.needsUpdate = true;
+  tapeGeo.setDrawRange(0, tapeN);
+  tape.visible = true;
+  tapeLabel.visible = tapeN === 2;
+  if (tapeN < 2) return;
+  const a = new THREE.Vector3().fromBufferAttribute(pos, 0), b = new THREE.Vector3().fromBufferAttribute(pos, 1);
+  const d = a.distanceTo(b), inch = Math.round(d / 0.0254);
+  tapeLabel.position.lerpVectors(a, b, 0.5);
+  const g = tapeCv.getContext('2d'), text = `${d.toFixed(2)} m · ${Math.floor(inch / 12)}' ${inch % 12}"`;
+  g.clearRect(0, 0, 512, 96);
+  g.font = '600 52px system-ui, sans-serif';
+  g.font = `600 ${Math.floor(52 * Math.min(1, 440 / g.measureText(text).width))}px system-ui, sans-serif`;     // long readings shrink to fit
+  const tw = g.measureText(text).width + 40;
+  g.fillStyle = 'rgba(14, 16, 20, .82)';
+  g.beginPath(); g.roundRect(256 - tw / 2, 8, tw, 80, 40); g.fill();
+  g.fillStyle = '#ffd23f'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 50);
+  tapeTex.needsUpdate = true;
+  window.__tape = text;                            // read by tests/test_site.mjs
 });
 
 // ---- map (M): the storey you are on from above, with room names, stairs, and where you stand and look
@@ -222,10 +287,14 @@ function drawMap(lv) {
   mg.textAlign = 'center';
   mg.textBaseline = 'middle';
   mg.fillStyle = '#fff';
-  for (const r of f.rooms) {            // a name is drawn only where it fits inside its room
+  for (const r of f.rooms) {            // a name (and on the big map its size) is drawn only where it fits inside its room
     const q = r.rects.reduce((a, b) => ((b[1] - b[0]) * (b[3] - b[2]) > (a[1] - a[0]) * (a[3] - a[2]) ? b : a));
-    const name = roomName(r);
-    if (mg.measureText(name).width < (q[1] - q[0]) * k - 2 && size < (q[3] - q[2]) * k - 2) mg.fillText(name, X((q[0] + q[1]) / 2), Y((q[2] + q[3]) / 2));
+    const lines = [roomName(r)], area = r.rects.reduce((s, c) => s + (c[1] - c[0]) * (c[3] - c[2]), 0);
+    if (mapBig) lines.push(`${(q[1] - q[0]).toFixed(2)} × ${(q[3] - q[2]).toFixed(2)} m`, `${area.toFixed(1)} m² · ${Math.round(area / 0.09290304)} sq ft`);
+    const fits = (n) => size * (1.3 * n - 0.3) < (q[3] - q[2]) * k - 2 && lines.slice(0, n).every((t) => mg.measureText(t).width < (q[1] - q[0]) * k - 2);
+    let n = lines.length;
+    while (n && !fits(n)) n--;
+    for (let i = 0; i < n; i++) mg.fillText(lines[i], X((q[0] + q[1]) / 2), Y((q[2] + q[3]) / 2) + (i - (n - 1) / 2) * size * 1.3);
   }
   // you: a view cone and a dot (yaw 0 looks along plan +y, turning left is positive)
   const px = X(p.x), py = Y(p.y), a = -Math.PI / 2 - p.yaw, len = mapBig ? 70 : 30;
@@ -286,6 +355,7 @@ function toggleRec() {
     $('rec').classList.remove('live');
     const blob = new Blob(chunks, { type: REC_TYPE });
     if (REC_TYPE.includes('mp4')) return save(blob, 'mp4');
+    if (site) return save(blob, 'webm');
     $('rec').textContent = 'Converting…';      // this browser records WebM: the server turns it into MP4
     fetch('/api/mp4', { method: 'POST', body: blob }).then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((mp4) => save(mp4, 'mp4'), () => save(blob, 'webm'))        // (no ffmpeg on the server: keep the WebM)
@@ -296,7 +366,7 @@ function toggleRec() {
   label();
 }
 // realistic photos (Cycles), when the house was built with them: a gallery over the walkthrough
-fetch(`/api/jobs/${job}`).then((r) => r.json()).then((st) => {
+if (!site) fetch(`/api/jobs/${job}`).then((r) => r.json()).then((st) => {      // (the website has no /api and no photos)
   const names = (st.photos || []).filter((n) => /^[\w.-]+\.jpg$/.test(n));
   if (!names.length) return;
   $('photogrid').replaceChildren(...names.map((n) => {
@@ -316,6 +386,68 @@ function showPhotos() { document.exitPointerLock?.(); $('gallery').hidden = fals
 $('photosbtn').onclick = showPhotos;
 $('closephotos').onclick = () => { $('gallery').hidden = true; };
 addEventListener('keydown', (e) => { if (e.code === 'Escape') $('gallery').hidden = true; });
+// ---- automatic tour (G): the route of walk.tourRoute, stepped like its test, recorded as one video
+const LOOK = 5;           // seconds of looking around in each room
+let tour = null, route = null;
+function startTour() {
+  if (measuring) setMeasure(false);      // the tape would be filmed
+  if (topView) toggleTop();
+  route ||= walk.tourRoute(meta);         // it depends on the house only
+  if (route.length < 2) return;
+  document.exitPointerLock?.();          // the mouse would fight the camera
+  $('overlay').style.display = 'none';
+  Object.assign(p, { x: route[0].x, y: route[0].y, z: route[0].z, pitch: 0 });
+  tour = { route, i: 0, n: 0, budget: 0, look: -1, yaw: 0, cam: null, rec: !rec };
+  if (tour.rec) toggleRec();
+  $('tour').textContent = 'Stop tour';
+  $('tour').classList.add('live');
+}
+function stopTour() {
+  if (!tour) return;
+  if (tour.rec && rec) toggleRec();      // stopping saves the video
+  tour = null;
+  $('tour').textContent = 'Tour';
+  $('tour').classList.remove('live');
+  $('overlay').style.display = locked || topView ? 'none' : 'flex';
+}
+function tourStep(dt) {
+  const w = tour.route[tour.i];
+  tour.cam = null;
+  if (tour.look >= 0) {                  // pan left, right and back to the heading, like tools/tour.py films it
+    const t = Math.min(1, tour.look += dt / LOOK);
+    p.yaw = tour.yaw + 1.2 * Math.sin(2 * Math.PI * t * t * (3 - 2 * t));
+    if (t === 1) { tour.look = -1; if (++tour.i === tour.route.length) stopTour(); }
+    return;
+  }
+  const head = Math.atan2(p.x - w.x, w.y - p.y), turn = Math.atan2(Math.sin(head - p.yaw), Math.cos(head - p.yaw));   // shortest way round
+  p.yaw += turn * Math.min(1, 3 * dt);   // eased turn towards the next waypoint
+  p.pitch *= 1 - Math.min(1, 3 * dt);
+  tour.budget += WALK * dt * Math.max(0, Math.cos(turn));     // slow down while turning; stand still to turn around
+  for (; tour.budget >= walk.SUB; tour.budget -= walk.SUB) {
+    if (Math.hypot(w.x - p.x, w.y - p.y) < 0.03) break;
+    const bx = p.x, by = p.y;
+    walk.stepTo(meta, p, w.x, w.y);
+    // shortcut: a stuck (or endlessly sliding) walker hops to the waypoint so the recording cannot run forever;
+    // tests/test_walk.mjs fails a route where that would happen
+    if ((p.x === bx && p.y === by) || ++tour.n > 2000) Object.assign(p, { x: w.x, y: w.y, z: w.z });
+  }
+  const d = Math.hypot(w.x - p.x, w.y - p.y);
+  if (d < 0.03) {                        // arrived: start the next leg exactly where the planner did
+    Object.assign(p, { x: w.x, y: w.y, z: w.z });
+    tour.budget = tour.n = 0;
+    if (w.room) { tour.look = 0; tour.yaw = p.yaw; } else tour.i++;
+    return;
+  }
+  // whole steps keep the walk exact; show the part of a step not yet taken so the camera glides
+  const r = Math.min(tour.budget, d) / d;
+  tour.cam = [p.x + (w.x - p.x) * r, p.y + (w.y - p.y) * r];
+}
+$('tour').onclick = startTour;
+// a click or touch ends the tour, and does nothing else (a click on Record must not start a second video)
+let eat = false;
+addEventListener('pointerdown', () => { eat = !!tour; stopTour(); }, true);
+addEventListener('click', (e) => { if (eat) { eat = false; e.stopPropagation(); } }, true);
+
 $('blend').onclick = async () => {        // the server packs the textures into one .blend (a few seconds, once per build)
   const b = $('blend');
   b.disabled = true;
@@ -331,6 +463,22 @@ $('blend').onclick = async () => {        // the server packs the textures into 
   b.disabled = false;
   b.textContent = 'Blender file';
 };
+$('site').onclick = async () => {         // the walkthrough as a static website, for clients who cannot reach this server
+  const b = $('site');
+  b.disabled = true;
+  b.textContent = 'Preparing…';
+  try {
+    const r = await fetch(`/api/jobs/${job}/site`, { method: 'POST' }), j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    const a = document.createElement('a');
+    a.href = j.url;
+    a.download = 'house-website.zip';
+    a.click();
+  } catch (e) { alert(e.message || 'Could not prepare the website.'); }
+  b.disabled = false;
+  b.textContent = 'Website';
+};
+if (site) ['blend', 'site', 'newplan'].forEach((id) => $(id).remove());
 $('shot').onclick = screenshot;
 $('rec').onclick = toggleRec;
 $('rec').hidden = !REC_TYPE;               // this browser cannot record video
@@ -342,7 +490,8 @@ renderer.setAnimationLoop(() => {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.05);
   frames++; fpsT += raw;
   if (fpsT > 0.5) { $('fps').textContent = `${Math.round(frames / fpsT)} fps`; frames = 0; fpsT = 0; }
-  if (!topView) {
+  if (!topView && tour) tourStep(dt);
+  if (!topView && !tour) {
     const sp = (keys.ShiftLeft || keys.ShiftRight ? RUN : WALK) * dt;
     let f = 0, s = 0;
     if (keys.KeyW || keys.ArrowUp) f += 1;
@@ -360,7 +509,10 @@ renderer.setAnimationLoop(() => {
       const dy = (Math.cos(p.yaw) * f + Math.sin(p.yaw) * s) * k;
       walk.move(meta, p, dx, dy);
     }
-    camera.position.copy(W(p.x, p.y, p.z + meta.eye));
+  }
+  if (!topView) {
+    const [cx, cy] = tour?.cam || [p.x, p.y];
+    camera.position.copy(W(cx, cy, p.z + meta.eye));
     camera.rotation.set(0, 0, 0);
     camera.rotation.order = 'YXZ';
     camera.rotation.y = p.yaw;
@@ -380,7 +532,7 @@ if (q.get('pose')) {
   $('overlay').style.display = 'none';
 }
 if (q.get('top') !== null) { toggleTop(); showLevels(+q.get('top') || 0); }
-if (q.get('embed') !== null) $('newplan').remove();        // inside another site's page there is no "new plan" to go to
+if (q.get('embed') !== null) $('newplan')?.remove();        // inside another site's page there is no "new plan" to go to
 // recording hook: draw one frame at a pose (metres, radians) and return it as a JPEG data URL
 window.__frame = (x, y, z, yaw, pitch) => {
   renderer.setAnimationLoop(null);

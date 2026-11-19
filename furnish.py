@@ -599,6 +599,12 @@ def furnish_floor(floor):
     return out
 
 
+def floor_items(plan, floor):
+    """what Blender builds on a floor: nothing if furnishing is off, the review page's own list if it edited this floor
+    (an empty one means empty rooms), else the rules' choice"""
+    return [] if plan.get("furnish") is False else floor["items"] if "items" in floor else furnish_floor(floor)
+
+
 def clashes(items, floor):
     """sanity check: solid items overlapping each other, or blocking a doorway"""
     bad = []

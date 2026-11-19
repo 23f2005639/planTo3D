@@ -3,7 +3,7 @@ Standard library only. Run: python3 server.py [--port 8080] [--host 127.0.0.1] [
 Builds run one at a time in Blender (GPU) in a background thread; progress is polled by the pages.
 --cors lets pages on another site call the API from the browser (ORIGIN such as https://example.com, or *).
 There is no login: run it on a trusted network, or behind your own backend or proxy."""
-import importlib, json, os, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
+import importlib, json, math, os, posixpath, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote
 
@@ -16,12 +16,13 @@ MAX_UPLOAD = 200 * 1024 * 1024       # plans are small; recordings sent for MP4 
 BUILD_TIMEOUT = 2 * 3600        # seconds; a high-quality build of a large house takes well under an hour
 ID = re.compile(r"^[a-f0-9]{12}$")
 sys.path.insert(0, HERE)
-import catalog, detect, fetch_assets  # noqa: E402
+import catalog, detect, fetch_assets, furnish  # noqa: E402
 
 os.makedirs(JOBS, exist_ok=True)
 builds = queue.Queue()
 lock = threading.RLock()        # reentrant: request handlers hold it around status() to check and set a stage in one step
 BUSY = ("uploaded", "detecting", "queued", "building")
+FINISHES = ("marble", "wood", "tile", "bathtile", "terracotta", "concrete")     # room.floor: blender/lib.py materials, as in edit.js FINISH
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
          ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".glb": "model/gltf-binary",
          ".wasm": "application/wasm", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".hdr": "application/octet-stream",
@@ -53,7 +54,7 @@ def read_status(jid):
 # ------------------------------------------------------------------ system check and the materials download
 _blender = None                 # Blender's version, read once ("" = not found)
 assets_job = dict(running=False, done=0, total=0, failed=[])
-export_lock = threading.Lock()
+export_lock, site_lock = threading.Lock(), threading.Lock()      # the site zip takes a second: it must not wait for a Blender pack
 
 
 def system():
@@ -107,6 +108,59 @@ def export_blend(jid):
     return f"/jobs/{jid}/house_blender.zip"
 
 
+def three_files():
+    """the three.js files the viewer loads: what view.js and walk.js import from three, and what those import in turn"""
+    def deps(text, here):
+        for s in re.findall(r"\b(?:from|import)\s*['\"]([^'\"]+)['\"]", text):
+            if s == "three":
+                yield "build/three.module.js"
+            elif s.startswith("three/addons/"):
+                yield "examples/jsm/" + s[13:]
+            elif s.startswith(".") and here is not None:
+                yield posixpath.normpath(posixpath.join(here, s))
+    todo, seen = [f for w in ("view.js", "walk.js") for f in deps(open(os.path.join(WEB, w)).read(), None)], set()
+    while todo:
+        f = todo.pop()
+        if f not in seen and os.path.isfile(os.path.join(THREE, f)):      # (an example in a doc comment may name a file that is not there)
+            seen.add(f)
+            todo += deps(open(os.path.join(THREE, f)).read(), posixpath.dirname(f))
+    # DRACOLoader fetches its decoder at run time (the WebAssembly one, as every browser with import maps has it)
+    return sorted(seen) + ["examples/jsm/libs/draco/draco_wasm_wrapper.js", "examples/jsm/libs/draco/draco_decoder.wasm"]
+
+
+def export_site(jid):
+    """jobs/<id>/house_site.zip: the walkthrough as a static website for any web host, without this server (made once
+    per build). Only the house itself leaves the job folder: never the client's PDF, the plan or the logs."""
+    d = jdir(jid)
+    glb, out = os.path.join(d, "house.glb"), os.path.join(d, "house_site.zip")
+    if not os.path.exists(glb):
+        raise ValueError("build the 3D house first")
+    srcs = [glb, os.path.join(d, "meta.json")] + [os.path.join(WEB, f) for f in ("view.html", "view.js", "walk.js", "style.css")]
+    with site_lock:
+        if not os.path.exists(out) or os.path.getmtime(out) < max(map(os.path.getmtime, srcs)):     # a new build or a new viewer
+            meta = json.load(open(os.path.join(d, "meta.json")))
+            house = ["meta.json", "house.glb"] + [os.path.basename(f) for f in (meta.get("lightmaps") or {}).values()]
+            # view.html with three.js next to it; view.js finds no ?job= and reads the house from ./house/
+            page = open(os.path.join(WEB, "view.html")).read().replace('"/three/', '"./three/')
+            with zipfile.ZipFile(out + ".part", "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("index.html", page)
+                for f in ("view.js", "walk.js", "style.css"):
+                    z.write(os.path.join(WEB, f), f)
+                for f in three_files():
+                    z.write(os.path.join(THREE, f), "three/" + f)
+                for f in house:          # already compressed (Draco, WebP)
+                    z.write(os.path.join(d, f), "house/" + f, zipfile.ZIP_STORED)
+                z.writestr("README.txt", "3D walkthrough - made by PlanTo3D.\n\n"
+                           "Put this folder on any static web host (Netlify, GitHub Pages, your own server) and open index.html.\n"
+                           "To try it on your computer, run a web server in this folder, for example\n"
+                           "    python3 -m http.server 8000\n"
+                           "and open http://localhost:8000/ . Opening index.html straight from the disk does not work:\n"
+                           "browsers do not load the viewer's modules from file:// pages.\n\n"
+                           "Viewer: three.js (MIT). Textures and models are CC0, from polyhaven.com.\n")
+            os.replace(out + ".part", out)
+    return f"/jobs/{jid}/house_site.zip"
+
+
 # ------------------------------------------------------------------ your own furniture models
 CUSTOM, THUMBS = os.path.join(fetch_assets.ROOT, "custom"), os.path.join(fetch_assets.ROOT, "thumbs")
 thumbs_job = dict(running=False, again=False, tried=False)
@@ -149,6 +203,39 @@ def furniture():
     return dict(rendering=thumbs_job["running"], items=[
         dict(fn=fn, label=label, custom=os.path.exists(os.path.join(CUSTOM, f"{fn}.glb")),
              thumb=os.path.exists(os.path.join(THUMBS, f"{fn}.png"))) for fn, (label, *_) in catalog.CATALOG.items()])
+
+
+def plan_items(jid):
+    """the furniture each floor will get: the review page's own list if it edited that floor, else the rules' choice"""
+    plan = json.load(open(os.path.join(jdir(jid), "plan.json")))
+    return dict(floors=[furnish.floor_items(plan, f) for f in plan["floors"]], catalog={fn: [label, w, d, kw] for fn, (label, w, d, kw) in catalog.CATALOG.items()})
+
+
+# items the browser may send: must match gen.CALLS (gen.py runs inside Blender, so it cannot be imported here),
+# minus "model", whose argument is an asset file name
+ITEM_FNS = set(catalog.CATALOG) | {"shower2", "geyser", "kitchen_run", "chimney", "wall_cab2", "rug", "car",
+                                   "outdoor_set", "bathtub", "round_rug"}
+WORD = re.compile(r"[\w+-]{0,24}")       # side names such as "-x" and material names; nothing that can be a path
+
+
+def check_items(plan):
+    """furniture lists from the browser go to Blender as function arguments: only known items, plain values"""
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    plain = lambda v: v is None or isinstance(v, bool) or num(v) or (isinstance(v, str) and WORD.fullmatch(v))
+    for f in plan["floors"]:
+        if not isinstance(f, dict) or "items" not in f:
+            continue
+        items = f["items"]
+        if not isinstance(items, list) or len(items) > 400:
+            raise ValueError("invalid furniture list")
+        for it in items:
+            if not (isinstance(it, dict) and isinstance(it.get("fn"), str) and it["fn"] in ITEM_FNS
+                    and isinstance(it.get("args"), list) and len(it["args"]) <= 8 and all(num(v) or isinstance(v, str) and WORD.fullmatch(v) for v in it["args"])
+                    and isinstance(it.get("box"), list) and len(it["box"]) == 4 and all(map(num, it["box"]))
+                    and isinstance(it.get("kw"), dict) and len(it["kw"]) <= 12
+                    and all(WORD.fullmatch(k) and plain(v) for k, v in it["kw"].items())
+                    and isinstance(it.get("solid", True), bool) and isinstance(it.get("room", ""), str)):
+                raise ValueError("invalid furniture item")
 
 
 # ------------------------------------------------------------------ pipeline steps
@@ -339,6 +426,15 @@ class H(BaseHTTPRequestHandler):
                 left = st["started"] + st["eta_total"] - time.time()
                 st["eta_left"] = max(0, round(min(left, 15) if st.get("message") == "exporting model" and not st.get("want_photos") else left))   # the build's last step
             return self.send(200 if st else 404, st or {"error": "no such job"})
+        m = re.match(r"^/api/jobs/([a-f0-9]{12})/furniture$", p)
+        if m:
+            if not os.path.exists(os.path.join(jdir(m.group(1)), "plan.json")):
+                return self.send(404, {"error": "no plan yet"})
+            try:
+                return self.send(200, plan_items(m.group(1)))
+            except Exception:
+                traceback.print_exc()
+                return self.send(500, {"error": "The furniture could not be worked out - see the server log."})
         if p == "/api/system":
             return self.send(200, system())
         if p == "/api/jobs":
@@ -421,11 +517,15 @@ class H(BaseHTTPRequestHandler):
                 status(jid, name=name, stage="uploaded", progress=0, message="Uploaded", created=time.time())
                 threading.Thread(target=run_detect, args=(jid,), daemon=True).start()
                 return self.send(200, {"id": jid})
-            m = re.match(r"^/api/jobs/([a-f0-9]{12})/(plan|build|export)$", p)
+            m = re.match(r"^/api/jobs/([a-f0-9]{12})/(plan|build|export|site)$", p)
             if m and os.path.isdir(jdir(m.group(1))):
                 jid, what = m.groups()
                 if what == "export":
                     return self.send(200, {"url": export_blend(jid)})
+                if what == "site":
+                    if (read_status(jid) or {}).get("stage") in BUSY:      # half old, half new files: and it would be kept
+                        return self.send(409, {"error": "this plan is being read or built"})
+                    return self.send(200, {"url": export_site(jid)})
                 req = json.loads(self.body() or b"{}")
                 if not isinstance(req, dict):
                     raise ValueError("expected a JSON object")
@@ -435,6 +535,15 @@ class H(BaseHTTPRequestHandler):
                     if what == "plan":
                         if not isinstance(req.get("floors"), list) or not req["floors"]:
                             return self.send(400, {"error": "invalid plan"})
+                        # both go to Blender as material names / colours: only values it knows
+                        rooms = [z for f in req["floors"] if isinstance(f, dict) and isinstance(f.get("rooms"), list)
+                                 for z in f["rooms"] if isinstance(z, dict)]
+                        if any("floor" in z and z["floor"] not in FINISHES for z in rooms):
+                            return self.send(400, {"error": "Unknown floor finish."})
+                        wall = req.get("wall_color")
+                        if "wall_color" in req and not (isinstance(wall, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", wall)):
+                            return self.send(400, {"error": "Wall colour must look like #rrggbb."})
+                        check_items(req)
                         with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
                             json.dump(req, fh)
                         return self.send(200, {"ok": True})

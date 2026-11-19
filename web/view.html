@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>3D Walkthrough</title>
-<link rel="stylesheet" href="/web/style.css?v=2">
+<link rel="stylesheet" href="style.css?v=2">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #111; touch-action: none; }
   canvas { display: block; }
@@ -36,6 +36,8 @@
   #map.big { right: 50%; bottom: 50%; transform: translate(50%, 50%); width: min(88vw, 88vh, 900px); height: min(88vw, 88vh, 900px);
              background: rgba(14, 16, 20, .92); }
   .mapbig #room, .mapbig #cross { visibility: hidden; }      /* the large map shows the room itself */
+  .measure canvas:not(#map) { cursor: crosshair; }
+  .measure #cross { visibility: hidden; }                    /* the mouse pointer aims instead */
   @media (max-width: 600px) { #map:not(.big) { width: 130px; height: 130px; bottom: 100px; } }
   @media (pointer: coarse) { .desk { display: none; } }
   @media (pointer: fine) { .touch { display: none; } }
@@ -50,13 +52,13 @@
   <h1>3D walkthrough</h1>
   <p id="status">Loading…</p>
   <p class="desk"><kbd>W A S D</kbd> walk · <kbd>Mouse</kbd> look · <kbd>Shift</kbd> run · <kbd>T</kbd> top view · <kbd>Esc</kbd> pause</p>
-  <p class="desk"><kbd>P</kbd> screenshot · <kbd>R</kbd> start / stop recording · <kbd>M</kbd> map</p>
+  <p class="desk"><kbd>P</kbd> screenshot · <kbd>R</kbd> start / stop recording · <kbd>M</kbd> map · <kbd>N</kbd> measure · <kbd>G</kbd> guided tour (recorded)</p>
   <p class="touch">Left thumb: move · right thumb: look</p>
 </div>
 <div id="gallery" hidden><button id="closephotos">Close</button><p style="color:#bbb;font-size:13px;margin:0 auto 12px;max-width:1500px">Realistic photos · BETA: rendered with Cycles, the camera spot is chosen automatically.</p><div class="grid" id="photogrid"></div></div>
 <div id="room"></div>
 <div id="cross"></div>
-<div id="bar"><button id="topbtn">Top view</button><span id="floors"></span><button id="shot" title="Save a picture of this view (P)">Screenshot</button><button id="rec" title="Record a video of your walk (R)">Record</button><button id="blend" title="Download this house as a Blender file (.zip)">Blender file</button><button id="photosbtn" hidden title="Realistic photos of each room, rendered with Blender's Cycles engine (beta)">Photos · BETA</button><a href="/" id="newplan" style="color:#ccc;font-size:13px">Home</a><span id="fps"></span></div>
-<script type="module" src="/web/view.js"></script>
+<div id="bar"><button id="topbtn">Top view</button><span id="floors"></span><button id="measure" title="Measure a distance: click two points (N)">Measure</button><button id="shot" title="Save a picture of this view (P)">Screenshot</button><button id="rec" title="Record a video of your walk (R)">Record</button><button id="tour" title="Walk through every room by itself and record it as a video where this browser can record (G); any key or click stops">Tour</button><button id="blend" title="Download this house as a Blender file (.zip)">Blender file</button><button id="site" title="Download this walkthrough as a website for any web host (.zip)">Website</button><button id="photosbtn" hidden title="Realistic photos of each room, rendered with Blender's Cycles engine (beta)">Photos · BETA</button><a href="/" id="newplan" style="color:#ccc;font-size:13px">Home</a><span id="fps"></span></div>
+<script type="module" src="view.js"></script>
 </body>
 </html>
