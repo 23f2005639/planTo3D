@@ -5,7 +5,8 @@ import json, os, shutil, subprocess, sys, tempfile, threading, urllib.error, url
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT)
+sys.path[:0] = [ROOT, os.path.join(ROOT, "examples")]
+import make_sample as M  # noqa: E402
 import server  # noqa: E402
 
 server.JOBS = tempfile.mkdtemp()          # never touch the real jobs folder
@@ -47,16 +48,7 @@ try:
 
     # a title sheet with no drawing before the plan: the plan on page 2 is found, and its page is the one drawn
     cover = os.path.join(server.JOBS, "cover.pdf")
-    objs = [b"<</Type/Catalog/Pages 2 0 R>>", b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-            b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>"]
-    pdf, offs = b"%PDF-1.4\n", []
-    for k, o in enumerate(objs, 1):
-        offs.append(len(pdf))
-        pdf += b"%d 0 obj%s endobj\n" % (k, o)
-    xref = len(pdf)
-    pdf += b"xref\n0 4\n0000000000 65535 f \n" + b"".join(b"%010d 00000 n \n" % o for o in offs)
-    pdf += b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n" % xref
-    open(cover, "wb").write(pdf)
+    open(cover, "wb").write(M.pdf_page(b""))
     jid = job("uploaded")
     subprocess.run(["pdfunite", cover, os.path.join(ROOT, "examples", "sample_plan.pdf"),
                     os.path.join(server.jdir(jid), "source.pdf")], check=True)

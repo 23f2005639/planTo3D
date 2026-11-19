@@ -5,11 +5,11 @@ import debug_draw, detect, vector  # noqa: E402
 
 pdf, js, out = sys.argv[1:4]
 P = json.load(open(js))
-s = P["scale_pt_per_ft"]
 layers = []
 COL = dict(door=(0, 170, 0, 200), window=(0, 90, 255, 200), opening=(255, 200, 0, 220))
 for f in P["floors"]:
     X0, Y1 = f["origin_pt"]
+    s = f.get("scale_pt_per_ft", P["scale_pt_per_ft"])
     R = lambda r: (X0 + r[0] * s, X0 + r[1] * s, Y1 - r[3] * s, Y1 - r[2] * s)
     random.seed(1)
     for rm in f["rooms"]:
