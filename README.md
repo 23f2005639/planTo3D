@@ -88,7 +88,8 @@ python server.py
 | **Time estimate** | The build box shows about how long is left, learned from earlier builds on the same machine |
 | **Walkthrough** | W A S D and mouse on desktop, two thumbs on a phone. Starts at the entrance side of the plan |
 | **Top view** (T) | The house from above, one storey at a time |
-| **Map** (M) | Room names, stairs, where you stand and look |
+| **Map** (M) | Room names, stairs, where you stand and look; the big map adds each room's size and area |
+| **Measure** (N) | Click or tap two points on the house for the distance in metres and feet-inches (drag to look around meanwhile); works in top view too. The line and label are drawn in the 3D view, so screenshots and recordings show them |
 | **Screenshot** (P) | PNG of about 4K size |
 | **Record** (R) | Video of your walk as MP4 (browsers that record WebM are converted on the server; needs ffmpeg) |
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |

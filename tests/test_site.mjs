@@ -1,6 +1,6 @@
 // End-to-end check of the site in a real (headless) browser, against a running server:
 // the upload page rejects a non-PDF and accepts a PDF; the review page's "Furniture" box, unticked, gives a draft build
-// whose saved plan has furnish=false, and the build box shows status words and the time left; in the walkthrough, P saves a 4K-size PNG, R records a video, M enlarges the map and T-T returns to walking.
+// whose saved plan has furnish=false, and the build box shows status words and the time left; in the walkthrough, P saves a 4K-size PNG, R records a video, M enlarges the map, N measures and T-T returns to walking.
 // Takes about 2 min (one draft build); removes its own job.
 // CHROME=/path/to/chromium node tests/test_site.mjs <plan.pdf> [http://127.0.0.1:8080]
 import { spawn } from 'node:child_process';
@@ -94,6 +94,11 @@ try {
   await key('KeyM', 77);
   assert.equal(await ev(`document.getElementById('map').classList.contains('big')`), true, 'M should enlarge the map');
   await key('KeyM', 77);
+  // tape measure: N frees the mouse, two clicks on the house ahead give a distance label, N again ends it
+  await key('KeyN', 78);
+  for (const x of [440, 840]) for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x, y: 560, button: 'left', clickCount: 1 });
+  assert.match(await ev(`window.__tape || ''`), /^\d+\.\d\d m · \d+' \d+"$/, 'two clicks in measure mode should measure a distance');
+  await key('KeyN', 78);
   await key('KeyT', 84);
   await sleep(400);
   await key('KeyT', 84);
@@ -106,7 +111,7 @@ try {
   assert(ihdr.readUInt32BE(16) * ihdr.readUInt32BE(20) >= 0.95 * 3840 * 2160, 'screenshot should be about 4K');
   assert(fs.statSync(path.join(dl, vid)).size > 100e3, 'recording should not be empty');
   fs.rmSync(dl, { recursive: true });
-  console.log('PASS upload page, furniture option, furniture models dialog, build box, screenshot, recording, map and top view');
+  console.log('PASS upload page, furniture option, furniture models dialog, build box, screenshot, recording, map, measure and top view');
 } finally {
   ch.kill();
   if (job) fs.rmSync(new URL(`../jobs/${job}`, import.meta.url), { recursive: true, force: true });   // the test's own upload
