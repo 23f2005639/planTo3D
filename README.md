@@ -84,6 +84,7 @@ python server.py
 | | |
 |---|---|
 | **Review before building** | Detected walls, doors, windows and rooms drawn over your PDF. Click to change or delete, draw walls, add doors and windows, set the scale |
+| **Floor finish and wall paint** | Pick a room's floor (marble, wood, tiles, bathroom tiles, terracotta, concrete; Auto follows the room type) and one wall colour for the house. Saved in the plan as `room.floor` and `wall_color` (`#rrggbb`) |
 | **Furniture on or off** | Untick **Furniture** for empty rooms |
 | **Time estimate** | The build box shows about how long is left, learned from earlier builds on the same machine |
 | **Walkthrough** | W A S D and mouse on desktop, two thumbs on a phone. Starts at the entrance side of the plan |
