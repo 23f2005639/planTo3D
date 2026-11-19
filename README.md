@@ -94,6 +94,7 @@ python server.py
 | **Measure** (N) | Click or tap two points on the house for the distance in metres and feet-inches (drag to look around meanwhile); works in top view too. The line and label are drawn in the 3D view, so screenshots and recordings show them |
 | **Screenshot** (P) | PNG of about 4K size |
 | **Record** (R) | Video of your walk as MP4 (browsers that record WebM are converted on the server; needs ffmpeg) |
+| **Tour** (G) | Walks itself from the entrance through every room and up the stairs, looks around in each, and records it as one video. Any key or click stops it |
 | **Your own furniture** | The Furniture models page shows each item and lets you replace it with your `.glb` model |
 | **Sample plan, delete** | "Try the sample plan" on the home page; every plan in the list has Delete |
 | **Blender file** | The house as one `.blend` with every texture packed inside, in a zip |

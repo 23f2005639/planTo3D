@@ -1,5 +1,5 @@
 // Walk test on a generated house: climb every storey's stairs (flight -> landing -> flight) and check we arrive
-// on the next floor; and check walls stop the walker.  Run: node tests/test_walk.mjs jobs/<id>/meta.json
+// on the next floor; check walls stop the walker; and walk the automatic tour (walk.tourRoute) leg by leg.  Run: node tests/test_walk.mjs jobs/<id>/meta.json
 import fs from 'node:fs';
 import * as walk from '../web/walk.js';
 
@@ -57,4 +57,24 @@ if (w) {
     check(p.y < w[2], `wall at y=${w[2].toFixed(2)} stopped the walker at y=${p.y.toFixed(2)}`);
   }
 }
+
+// the automatic tour: each leg arrives by stepping (the viewer steps the same way), every stop is in its room, every
+// upper storeys are reached when there are stairs
+const route = walk.tourRoute(meta), stops = route.filter((w) => w.room);
+let stuck = null;
+for (let i = 1; i < route.length && !stuck; i++) {
+  const p = { ...route[i - 1] };
+  for (let n = 0; n < 2000 && Math.hypot(route[i].x - p.x, route[i].y - p.y) >= 0.03; n++) walk.stepTo(meta, p, route[i].x, route[i].y);
+  if (Math.hypot(route[i].x - p.x, route[i].y - p.y) >= 0.03 || Math.abs(p.z - route[i].z) > 0.05) stuck = `leg ${i} stopped at ${p.x.toFixed(2)}, ${p.y.toFixed(2)}`;
+}
+check(route.length > 1 && !stuck, `tour: ${route.length} waypoints walked without getting stuck${stuck ? ` (${stuck})` : ''}`);
+check(stops.every((w) => meta.floors[w.level].rooms.some((r) => r.label === w.room && r.rects.some((q) => walk.inRect(q, w.x, w.y)))
+  && Math.abs(w.z - meta.floors[w.level].z) < 0.01), `tour: all ${stops.length} stops stand in their room`);
+const worth = meta.floors.flatMap((f) => f.rooms.filter((r) => !['open', 'duct', 'stair'].includes(r.type)
+  && r.rects.reduce((a, q) => a + (q[1] - q[0]) * (q[3] - q[2]), 0) >= 2));
+// (not a failure: a room with no door drawn cannot be walked into)
+console.log(`${stops.length === worth.length ? 'ok  ' : 'note'} tour: looked into ${stops.length} of ${worth.length} rooms`);
+meta.floors.forEach((f, k) => {
+  if (k && meta.floors[k - 1].stairs?.length) check(stops.some((w) => w.level === k), `tour: went up to ${f.name}`);
+});
 process.exit(fails ? 1 : 0);
