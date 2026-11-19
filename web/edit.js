@@ -85,6 +85,7 @@ function buildStatus(st) {
 
 // ---------------------------------------------------------------- geometry helpers
 const F = () => plan.floors[fi];
+const scaleOf = (f) => f.scale_pt_per_ft || plan.scale_pt_per_ft;      // each page of the PDF has its own (older plans: one)
 const toC = (x, y) => [view.ox + x * view.k, view.oy - y * view.k];
 const toP = (X, Y) => [(X - view.ox) / view.k, (view.oy - Y) / view.k];
 const inR = (r, x, y, m = 0) => x >= r[0] - m && x <= r[1] + m && y >= r[2] - m && y <= r[3] + m;
@@ -105,7 +106,7 @@ function snapshot() { history.push(JSON.stringify(plan)); if (history.length > 5
 function rectC(r) { const [a, b] = toC(r[0], r[3]), [c, d] = toC(r[1], r[2]); return [a, b, c - a, d - b]; }
 // floor j's plan coordinates -> the current floor's (both are measured from their own lower-left corner)
 function offsetOf(j) {
-  const s = plan.scale_pt_per_ft, a = F().origin_pt, b = plan.floors[j].origin_pt;
+  const s = scaleOf(F()), a = F().origin_pt, b = plan.floors[j].origin_pt;      // (j is on the same page)
   return [(b[0] - a[0]) / s, (a[1] - b[1]) / s];
 }
 function drawFloor(f, dx, dy, active) {
@@ -144,7 +145,7 @@ function draw() {
   cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, cv.clientWidth, cv.clientHeight);
-  const f = F(), s = plan.scale_pt_per_ft, im = img[f.page || 1];
+  const f = F(), s = scaleOf(f), im = img[f.page || 1];
   if (im?.complete) {
     const sc = view.k / (s * D);
     g.globalAlpha = 0.45;
@@ -163,8 +164,9 @@ function ui() {
   document.querySelectorAll('#tabs button').forEach((b, i) => b.classList.toggle('on', i === fi));
   const f = F();
   $('fname').value = f.name;
-  $('scale').textContent = `${plan.floors.length} floor${plan.floors.length > 1 ? 's' : ''} · scale ${plan.scale_source === 'labels'
-    ? 'read from room sizes' : 'GUESSED - use Set scale'}`;
+  const src = f.scale_source || plan.scale_source;
+  $('scale').textContent = `${plan.floors.length} floor${plan.floors.length > 1 ? 's' : ''} · scale ${src === 'labels'
+    ? 'read from room sizes' : src === 'user' ? 'set by you' : 'GUESSED - use Set scale'}`;
   const P = $('props');
   P.innerHTML = '';
   if (!sel) { P.innerHTML = `<h3>Selection</h3><p class="muted" style="font-size:13px">${f.walls.length} walls, ${f.openings.length} openings, ${f.rooms.length} rooms</p>`; draw(); return; }
@@ -247,15 +249,16 @@ function parseFeet(s) {
 function rescale(k) {
   snapshot();
   const R = (r) => { for (let i = 0; i < 4; i++) r[i] *= k; };
-  for (const f of plan.floors) {
+  const page = F().page || 1;
+  for (const f of plan.floors.filter((o) => (o.page || 1) === page)) {      // the other pages keep their own scale
     f.walls.forEach(R); f.openings.forEach((o) => { R(o.rect); if (o.hinge) o.hinge = o.hinge.map((v) => v * k); });
     f.rooms.forEach((z) => { z.rects.forEach(R); z.area = +(z.area * k * k).toFixed(1); });
     (f.stairs || []).forEach((s) => { R(s.rect); s.words = s.words.map(([t, x, y]) => [t, x * k, y * k]); });
     (f.labels || []).forEach((l) => { l.at = l.at.map((v) => v * k); });
     f.size = f.size.map((v) => v * k);
+    f.scale_pt_per_ft = scaleOf(f) / k;
+    f.scale_source = 'user';
   }
-  plan.scale_pt_per_ft /= k;
-  plan.scale_source = 'user';
 }
 
 let drag = null;

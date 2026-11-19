@@ -9,6 +9,7 @@ const CH = process.env.CHROME || 'chromium';
 const port = 9400 + Math.floor(Math.random() * 400);
 const ch = spawn(CH, ['--headless=new', '--no-sandbox', `--remote-debugging-port=${port}`, '--window-size=1280,720',
   '--hide-scrollbars', '--use-angle=gl-egl', '--ignore-gpu-blocklist', '--enable-gpu', 'about:blank'], { stdio: 'ignore' });
+process.on('exit', () => ch.kill());              // also when a frame fails: no headless Chrome left on the GPU
 const sleep = (t) => new Promise((r) => setTimeout(r, t));
 let targets;
 for (let i = 0; i < 100 && !targets; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); } catch { await sleep(200); } }
@@ -36,5 +37,4 @@ for (let i = 0; i < frames.length; i++) {
   if (i % 500 === 0) console.log(`frame ${i}/${frames.length}  ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 }
 console.log(`done ${frames.length} frames in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-ch.kill();
 process.exit(0);

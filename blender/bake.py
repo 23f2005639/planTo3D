@@ -59,7 +59,6 @@ def _join(name, objs):
     for o in vl.objects:
         o.select_set(False)
     target = objs[0]
-    coll = target.users_collection[0]
     for o in objs:
         o.select_set(True)
     vl.objects.active = target
@@ -126,8 +125,9 @@ def _unwrap(ob):
     bpy.ops.object.mode_set(mode="OBJECT")
 
 
-def _cool_down(progress, limit=78, resume=65):
-    """laptop GPUs overheat on long bakes: pause between bakes while the GPU is hot"""
+def _cool_down(progress, limit=78, resume=65, most=900):
+    """laptop GPUs overheat on long bakes: pause between bakes while the GPU is hot (at most `most` seconds:
+    a GPU kept warm by another program must not stall the build)"""
     import subprocess, time
     def temp():
         try:
@@ -139,7 +139,8 @@ def _cool_down(progress, limit=78, resume=65):
     t = temp()
     if t >= limit:
         progress(None, f"GPU at {t}C - cooling down")
-        while temp() > resume:
+        end = time.time() + most
+        while temp() > resume and time.time() < end:
             time.sleep(5)
 
 

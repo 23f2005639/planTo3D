@@ -22,3 +22,19 @@ for k, *r in drawn:
     assert any(o["type"] == k and all(abs(a - b) < 0.1 for a, b in zip(o["rect"], r)) for o in f["openings"]), (k, r)
 print("ok   sample plan: %d walls, %d doors, %d windows, %d rooms, scale %.1f pt/ft" % (
     len(f["walls"]), kinds.count("door"), kinds.count("window"), len(f["rooms"]), plan["scale_pt_per_ft"]))
+
+# more pages: a sheet of slanted lines (a rotated site plan) is skipped, and a page drawn at another scale keeps it
+import subprocess, tempfile  # noqa: E402
+with tempfile.TemporaryDirectory() as d:
+    pages = [os.path.join(HERE, "..", "examples", "sample_plan.pdf")]
+    for k, stream in enumerate((b"".join(b"%d 10 m %d 400 l S\n" % (10 + 2 * i, 60 + 2 * i) for i in range(200)),
+                                b"q 0.75 0 0 0.75 0 0 cm\n" + M.stream + b"\nQ")):
+        pages.append(os.path.join(d, f"p{k}.pdf"))
+        open(pages[-1], "wb").write(M.pdf_page(stream))
+    subprocess.run(["pdfunite", *pages, os.path.join(d, "all.pdf")], check=True)
+    many = detect.detect(os.path.join(d, "all.pdf"))
+fs = many["floors"]
+assert [f["page"] for f in fs] == [1, 3], [f["page"] for f in fs]
+assert abs(fs[0]["scale_pt_per_ft"] - M.S) < 0.02 * M.S and abs(fs[1]["scale_pt_per_ft"] - 0.75 * M.S) < 0.02 * M.S, fs
+assert all(abs(a - b) < 0.1 for f in fs for a, b in zip(f["size"], M.EXPECT["size"])), [f["size"] for f in fs]
+print("ok   more pages: a sheet without walls skipped, each page read at its own scale")

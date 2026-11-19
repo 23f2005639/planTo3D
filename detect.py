@@ -241,6 +241,8 @@ def thickness_mode(walls):
     h = defaultdict(float)
     for c0, c1, a0, a1 in walls:
         h[round(c1 - c0, 1)] += a1 - a0
+    if not h:
+        raise PlanError("no double-line walls on this page")
     best = max(h, key=lambda g: sum(v for k, v in h.items() if abs(k - g) <= 0.3))
     return best
 
@@ -349,7 +351,6 @@ def arcs(curves):
     res = []
     for a, pts in merged:
         cx, cy, r = a[:3]
-        angs = sorted(math.atan2(p[1] - cy, p[0] - cx) for p in pts)
         res.append((cx, cy, r, pts))
     return res
 
@@ -363,6 +364,8 @@ def wall_pens(segs):
             ink[col, round(w, 2)] += abs(x1 - x0) + abs(y1 - y0)
     total = sum(ink.values()) or 1
     big = {k: v for k, v in ink.items() if v >= 0.05 * total}
+    if not big:                 # no straight lines worth a wall (a rotated site plan, a sketch)
+        raise PlanError("no straight wall lines on this page")
     wmax = max(k[1] for k in big)
     pens = {k for k in ink if k[1] >= 0.6 * wmax}
     # walls are plotted in black / grey; coloured wide pens are window frames, columns, beams
@@ -970,8 +973,8 @@ def detect(pdf):
             pg = detect_page(page)
         except PlanError:
             continue
-        for f in pg["floors"]:
-            f["page"] = k
+        for f in pg["floors"]:          # pages of one PDF can be drawn at different scales
+            f.update(page=k, scale_pt_per_ft=round(pg["scale"], 4), scale_source=pg["scale_source"])
         pages.append(pg)
     if lines < 150:          # any page of a CAD plan has thousands of lines; a cover sheet before the plans does not count
         raise PlanError("This PDF has almost no vector lines - it looks like a scan or photo. "
@@ -992,7 +995,7 @@ def detect(pdf):
         f["name"] = (f["title"] or f"Floor {i}").title().replace(" Plan", "")
     p0 = pages[0]
     return dict(version=1, source=pdf.rsplit("/", 1)[-1], units="ft", scale_pt_per_ft=round(p0["scale"], 4),
-                scale_source=p0["scale_source"], wall_pt=round(p0["T"], 2), floor_height=10.0, slab=0.5,
+                scale_source="labels" if all(p["scale_source"] == "labels" for p in pages) else "assumed", wall_pt=round(p0["T"], 2), floor_height=10.0, slab=0.5,
                 floors=floors)
 
 

@@ -1,5 +1,5 @@
 """Cinematic dusk tour of a built house (house.blend from gen.py): blue-hour sky, warm interior light with LED coves,
-garden uplights, one continuous camera glide through every room (route = tour.json), rendered frame by frame with
+one continuous camera glide through every room (route = tour.json), rendered frame by frame with
 heat locks on the GPU and CPU.  Resumable: frames already on disk are skipped.
 
 blender -b JOB/house.blend -P blender/cinema.py -- TOUR.json OUTDIR [--stills t1,t2,..] [--shots SHOTS.json] [--save OUT.blend] [--frames] [--res 1920x1080]
@@ -83,7 +83,8 @@ def light(name, kind, loc, energy, color, size=None, rot=None, coll=sc.collectio
 WARM, LED = (1.0, 0.72, 0.47), (1.0, 0.66, 0.38)
 H = TOUR.get("ceiling", 10.0)
 plan = json.load(open(TOUR["plan"]))
-INDOOR = {"bedroom", "toilet", "kitchen", "living", "dining", "puja", "study", "store", "passage", "room", "wash", "dress"}
+sys.path.insert(0, os.path.join(HERE, ".."))
+from furnish import INDOOR  # noqa: E402
 led = bpy.data.materials.new("cove_led")
 led.use_nodes = True
 em = led.node_tree.nodes.new("ShaderNodeEmission")
@@ -136,16 +137,6 @@ except Exception as e:                       # older Blender: shadows instead
     print("light linking unavailable:", e)
     for c in COVES:
         c.data.use_shadow = True
-# garden: warm uplights at the trees / shrubs, wall washers on the courtyard faces
-for o in sc.objects:
-    n = o.name.split("_at_")[0]
-    if o.type == "EMPTY" and n in ("island_tree_01", "shrub_02", "shrub_03", "planter_box_01", "planter_pot_clay"):
-        x, y = o.location.x / F, o.location.y / F
-        if "tree" not in n:
-            up = light("uplight", "SPOT", (x + 0.8, y - 0.6, 0.4), 60, (1.0, 0.75, 0.5),
-                       rot=(-20, 0, 0), spot_size=math.radians(70), spot_blend=0.8)
-            up.data.use_shadow = False
-
 # ------------------------------------------------------------------ restyle: warm neutrals like the reference
 def tint(name, rgb, rough=None):
     m = bpy.data.materials.get(name)
@@ -180,77 +171,16 @@ def recolour(name, rgb, rough=None):
                 n.inputs["Roughness"].default_value = rough
 
 
-for name, rgb in (("cushion", (0.5, 0.45, 0.38)), ("sofa_fabric", (0.78, 0.75, 0.7)), ("rug_round", (0.62, 0.58, 0.52)),
+for name, rgb in (("cushion", (0.5, 0.45, 0.38)), ("sofa_fabric", (1.05, 1.02, 0.97)), ("rug_round", (0.62, 0.58, 0.52)),
                   ("rug", (0.55, 0.5, 0.44)), ("terrace", (0.82, 0.8, 0.77)), ("ceiling", (0.85, 0.83, 0.8))):
     recolour(name, rgb)
-for name, rgb, rough in (("marble", (1.0, 0.97, 0.92), 0.12), ("sofa_fabric", (1.05, 1.02, 0.97), None),
-                         ("marble", (1.0, 0.97, 0.92), 0.12),
+for name, rgb, rough in (("marble", (1.0, 0.9409, 0.8464), 0.12),       # (the tint squared: it used to be applied twice)
                          ("tile", (1.0, 0.96, 0.9), 0.2)):
     tint(name, rgb, rough)
 for o in sc.objects:                              # flat white roof like a modern villa
     if o.type == "MESH" and o.name.startswith("roof") and bpy.data.materials.get("exterior"):
         o.data.materials.clear()
         o.data.materials.append(bpy.data.materials["exterior"])
-
-# procedural date palms instead of the broad-leaf tree (lighter and right for a courtyard)
-foliage = bpy.data.materials.get("foliage")
-bark = bpy.data.materials.get("bark") or foliage
-
-
-def palm(x, y, h=15.0, seed=0):
-    import random
-    rnd = random.Random(seed)
-    bm = bmesh.new()
-    lean = Vector((rnd.uniform(-0.6, 0.6), rnd.uniform(-0.6, 0.6), 0))
-    pts = [Vector((x, y, 0)) + lean * (k / 10) ** 2 + Vector((0, 0, h * k / 10)) for k in range(11)]
-    for k in range(10):
-        r0, r1 = 0.62 - 0.03 * k, 0.6 - 0.03 * (k + 1)
-        bmesh.ops.create_cone(bm, cap_ends=False, segments=12, radius1=r0 * F, radius2=r1 * F, depth=(h / 10) * F,
-                              matrix=Matrix.Translation(((pts[k] + pts[k + 1]) / 2) * F))
-    trunk = bpy.data.meshes.new("palm_trunk")
-    bm.to_mesh(trunk)
-    ob = bpy.data.objects.new("palm_trunk", trunk)
-    ob.data.materials.append(bark)
-    sc.collection.objects.link(ob)
-    top = pts[-1]
-    bm = bmesh.new()
-    for i in range(16):
-        az = 2 * math.pi * i / 16 + rnd.uniform(-0.15, 0.15)
-        L = rnd.uniform(5.0, 6.3)
-        lift = rnd.uniform(0.25, 0.6)
-        dirv = Vector((math.cos(az), math.sin(az), 0))
-        side = Vector((-math.sin(az), math.cos(az), 0))
-        prev = None
-        for k in range(13):
-            sct = k / 12
-            c = top + dirv * (L * sct) + Vector((0, 0, L * (lift * math.sin(math.pi * sct * 0.8) - 0.55 * sct * sct)))
-            w = 1.3 * math.sin(math.pi * min(sct, 0.98)) ** 0.6 + 0.05
-            a = bm.verts.new((c - side * w) * F)
-            b = bm.verts.new((c + side * w) * F)
-            m = bm.verts.new((c + Vector((0, 0, 0.12 * w))) * F)
-            if prev:
-                bm.faces.new((prev[0], a, m, prev[2]))
-                bm.faces.new((prev[2], m, b, prev[1]))
-            prev = (a, b, m)
-    leaves = bpy.data.meshes.new("palm_leaves")
-    bm.to_mesh(leaves)
-    lo = bpy.data.objects.new("palm_leaves", leaves)
-    lo.data.materials.append(foliage)
-    sc.collection.objects.link(lo)
-    return top
-
-
-PALMS = []
-for o in list(sc.objects):
-    if o.type == "EMPTY" and o.name.startswith("island_tree_01"):
-        x, y = o.location.x / F, o.location.y / F
-        for c in o.children_recursive:
-            c.hide_render = c.hide_viewport = True
-        PALMS.append((x, y, palm(x, y, 15.5, seed=len(PALMS))))
-for x, y, top in PALMS:
-    light("palm_up", "SPOT", (x + 1.6, y - 1.2, 0.3), 420, (1.0, 0.74, 0.48), rot=(-14, 0, 0),
-          spot_size=math.radians(55), spot_blend=0.9)
-
 
 # ------------------------------------------------------------------ renderer
 eng = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
@@ -366,6 +296,9 @@ if "--frames" in argv:
     sc.frame_start, sc.frame_end, sc.frame_step = opt("--start", 0), n - 1, opt("--step", 1)   # step 2: odd frames blended later
     sc.render.filepath = os.path.join(fd, "f_#####")
     sc.render.use_overwrite, sc.render.use_placeholder = False, True      # resumable: done frames are skipped
+    for f in glob.glob(os.path.join(fd, "f_*")):        # an empty placeholder is a frame cut off by a stop: render it again
+        if os.path.getsize(f) == 0:
+            os.remove(f)
     stamp = [time.time()]
 
     def heat_lock(scene, *_):

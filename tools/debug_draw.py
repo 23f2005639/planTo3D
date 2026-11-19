@@ -4,10 +4,10 @@ from PIL import Image, ImageDraw
 
 
 def page_image(pdf, page=1, dpi=150):
-    d = tempfile.mkdtemp()
-    subprocess.run(["pdftocairo", "-png", "-r", str(dpi), "-f", str(page), "-l", str(page), "-singlefile",
-                    pdf, os.path.join(d, "p")], check=True)
-    return Image.open(os.path.join(d, "p.png")).convert("RGB")
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(["pdftocairo", "-png", "-r", str(dpi), "-f", str(page), "-l", str(page), "-singlefile",
+                        pdf, os.path.join(d, "p")], check=True)
+        return Image.open(os.path.join(d, "p.png")).convert("RGB")
 
 
 def draw(pdf, layers, out, page=1, dpi=150, crop=None):
