@@ -93,7 +93,9 @@ const p = { ...walk.entrance(meta), z: floors[0].z, yaw: 0, pitch: 0 };
 const keys = {};
 let locked = false, topView = false;
 addEventListener('keydown', (e) => {
+  if (tour) { if (!e.repeat) stopTour(); return; }      // any key ends the tour (a held G only repeats)
   keys[e.code] = true;
+  if (e.code === 'KeyG' && !e.repeat) startTour();
   if (e.code === 'KeyT') toggleTop();
   if (e.code === 'KeyP' && !e.repeat) screenshot();
   if (e.code === 'KeyR' && !e.repeat) toggleRec();
@@ -108,12 +110,13 @@ $('overlay').addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
-  $('overlay').style.display = locked || topView ? 'none' : 'flex';
+  $('overlay').style.display = locked || topView || tour ? 'none' : 'flex';
+  if (locked && tour) document.exitPointerLock();      // (a lock asked for by leaving the top view lands late)
 });
 // the browser refused to capture the mouse: show the start screen, whose click captures it
 document.addEventListener('pointerlockerror', () => { if (!topView) $('overlay').style.display = 'flex'; });
 addEventListener('mousemove', (e) => {
-  if (!locked) return;
+  if (!locked || tour) return;
   p.yaw -= e.movementX * 0.0022;
   p.pitch = Math.max(-1.4, Math.min(1.4, p.pitch - e.movementY * 0.0022));
 });
@@ -295,6 +298,67 @@ function toggleRec() {
   $('rec').classList.add('live');
   label();
 }
+// ---- automatic tour (G): the route of walk.tourRoute, stepped like its test, recorded as one video
+const LOOK = 5;           // seconds of looking around in each room
+let tour = null, route = null;
+function startTour() {
+  if (topView) toggleTop();
+  route ||= walk.tourRoute(meta);         // it depends on the house only
+  if (route.length < 2) return;
+  document.exitPointerLock?.();          // the mouse would fight the camera
+  $('overlay').style.display = 'none';
+  Object.assign(p, { x: route[0].x, y: route[0].y, z: route[0].z, pitch: 0 });
+  tour = { route, i: 0, n: 0, budget: 0, look: -1, yaw: 0, cam: null, rec: !rec };
+  if (tour.rec) toggleRec();
+  $('tour').textContent = 'Stop tour';
+  $('tour').classList.add('live');
+}
+function stopTour() {
+  if (!tour) return;
+  if (tour.rec && rec) toggleRec();      // stopping saves the video
+  tour = null;
+  $('tour').textContent = 'Tour';
+  $('tour').classList.remove('live');
+  $('overlay').style.display = locked || topView ? 'none' : 'flex';
+}
+function tourStep(dt) {
+  const w = tour.route[tour.i];
+  tour.cam = null;
+  if (tour.look >= 0) {                  // pan left, right and back to the heading, like tools/tour.py films it
+    const t = Math.min(1, tour.look += dt / LOOK);
+    p.yaw = tour.yaw + 1.2 * Math.sin(2 * Math.PI * t * t * (3 - 2 * t));
+    if (t === 1) { tour.look = -1; if (++tour.i === tour.route.length) stopTour(); }
+    return;
+  }
+  const head = Math.atan2(p.x - w.x, w.y - p.y), turn = Math.atan2(Math.sin(head - p.yaw), Math.cos(head - p.yaw));   // shortest way round
+  p.yaw += turn * Math.min(1, 3 * dt);   // eased turn towards the next waypoint
+  p.pitch *= 1 - Math.min(1, 3 * dt);
+  tour.budget += WALK * dt * Math.max(0, Math.cos(turn));     // slow down while turning; stand still to turn around
+  for (; tour.budget >= walk.SUB; tour.budget -= walk.SUB) {
+    if (Math.hypot(w.x - p.x, w.y - p.y) < 0.03) break;
+    const bx = p.x, by = p.y;
+    walk.stepTo(meta, p, w.x, w.y);
+    // shortcut: a stuck (or endlessly sliding) walker hops to the waypoint so the recording cannot run forever;
+    // tests/test_walk.mjs fails a route where that would happen
+    if ((p.x === bx && p.y === by) || ++tour.n > 2000) Object.assign(p, { x: w.x, y: w.y, z: w.z });
+  }
+  const d = Math.hypot(w.x - p.x, w.y - p.y);
+  if (d < 0.03) {                        // arrived: start the next leg exactly where the planner did
+    Object.assign(p, { x: w.x, y: w.y, z: w.z });
+    tour.budget = tour.n = 0;
+    if (w.room) { tour.look = 0; tour.yaw = p.yaw; } else tour.i++;
+    return;
+  }
+  // whole steps keep the walk exact; show the part of a step not yet taken so the camera glides
+  const r = Math.min(tour.budget, d) / d;
+  tour.cam = [p.x + (w.x - p.x) * r, p.y + (w.y - p.y) * r];
+}
+$('tour').onclick = startTour;
+// a click or touch ends the tour, and does nothing else (a click on Record must not start a second video)
+let eat = false;
+addEventListener('pointerdown', () => { eat = !!tour; stopTour(); }, true);
+addEventListener('click', (e) => { if (eat) { eat = false; e.stopPropagation(); } }, true);
+
 $('blend').onclick = async () => {        // the server packs the textures into one .blend (a few seconds, once per build)
   const b = $('blend');
   b.disabled = true;
@@ -321,7 +385,8 @@ renderer.setAnimationLoop(() => {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.05);
   frames++; fpsT += raw;
   if (fpsT > 0.5) { $('fps').textContent = `${Math.round(frames / fpsT)} fps`; frames = 0; fpsT = 0; }
-  if (!topView) {
+  if (!topView && tour) tourStep(dt);
+  if (!topView && !tour) {
     const sp = (keys.ShiftLeft || keys.ShiftRight ? RUN : WALK) * dt;
     let f = 0, s = 0;
     if (keys.KeyW || keys.ArrowUp) f += 1;
@@ -339,7 +404,10 @@ renderer.setAnimationLoop(() => {
       const dy = (Math.cos(p.yaw) * f + Math.sin(p.yaw) * s) * k;
       walk.move(meta, p, dx, dy);
     }
-    camera.position.copy(W(p.x, p.y, p.z + meta.eye));
+  }
+  if (!topView) {
+    const [cx, cy] = tour?.cam || [p.x, p.y];
+    camera.position.copy(W(cx, cy, p.z + meta.eye));
     camera.rotation.set(0, 0, 0);
     camera.rotation.order = 'YXZ';
     camera.rotation.y = p.yaw;
