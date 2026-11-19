@@ -46,6 +46,10 @@ FLOOR_MAT = dict(dress="wood", bedroom="wood", toilet="bathtile", kitchen="marbl
                  garden="turf", open="pebbles", parking="pavers", yard="pavers", stair="stair", room="tile",
                  duct="concrete")
 OPEN_SKY = {"open", "garden", "yard"}      # no slab above these
+wall_hex = plan.get("wall_color")          # "#rrggbb" picked on the review page (sRGB); absent = lib's warm white
+if wall_hex:                               # Blender colour values are linear: undo the sRGB curve
+    MATS["wall"].node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (*[
+        v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in (int(wall_hex[i:i + 2], 16) / 255 for i in (1, 3, 5))], 1)
 
 
 # ------------------------------------------------------------------ helpers
@@ -483,7 +487,7 @@ for k, f in enumerate(floors):
     fl = {}
     well = [(*stair_box_prev, -9, 99)] if stair_box_prev else []
     for zn in f["rooms"]:
-        m = FLOOR_MAT.get(zn["type"], "tile")
+        m = zn.get("floor") or FLOOR_MAT.get(zn["type"], "tile")       # a finish chosen on the review page wins
         fl.setdefault(m, []).extend((*b[:4], -0.02, 0.0, m) for r in zn["rects"] for b in subtract_all([(*r, -0.02, 0.0)], well))
     for m, bs in fl.items():
         mesh_from_boxes(f"floor_{k}_{m}", bs)

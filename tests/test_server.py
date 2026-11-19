@@ -42,9 +42,17 @@ try:
     assert call("POST", f"/api/jobs/{done}/plan", b"not json")[0] == 400
     assert call("POST", f"/api/jobs/{done}/plan", b'{"floors": [{"name": "G"}]}')[0] == 200
     assert json.load(open(os.path.join(server.jdir(done), "plan.json")))["floors"][0]["name"] == "G"
+    # room finishes and wall colour reach Blender as material names and colours: only known values pass
+    plan = lambda room, **kw: json.dumps({"floors": [{"rooms": [room]}], **kw}).encode()
+    for bad in (plan({"floor": "lava"}), plan({"floor": ["wood"]}), plan({}, wall_color="red"), plan({}, wall_color="#12345g"),
+                plan({}, wall_color="#123456\n"), plan({}, wall_color=None)):
+        assert call("POST", f"/api/jobs/{done}/plan", bad)[0] == 400, bad
+    assert call("POST", f"/api/jobs/{done}/plan", plan({"floor": "wood"}, wall_color="#C3cdb4"))[0] == 200
+    saved = json.load(open(os.path.join(server.jdir(done), "plan.json")))
+    assert saved["floors"][0]["rooms"][0]["floor"] == "wood" and saved["wall_color"] == "#C3cdb4"
     assert call("POST", f"/api/jobs/{done}/export")[0] == 400           # nothing built yet
     assert call("DELETE", f"/api/jobs/{done}")[0] == 200 and not os.path.exists(server.jdir(done))
-    print("ok   server: hidden files, busy plans, bad bodies")
+    print("ok   server: hidden files, busy plans, bad bodies, room finishes")
 
     # a title sheet with no drawing before the plan: the plan on page 2 is found, and its page is the one drawn
     cover = os.path.join(server.JOBS, "cover.pdf")

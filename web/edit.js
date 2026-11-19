@@ -7,6 +7,10 @@ const TYPES = ['bedroom', 'toilet', 'kitchen', 'living', 'dining', 'puja', 'wash
 const ZCOL = { bedroom: '#c8a2c8', toilet: '#8fc7e8', kitchen: '#f2c48d', living: '#e9d48a', dining: '#e7b7a0', puja: '#f0a0a0',
   wash: '#a8d5c2', store: '#bbb', study: '#b8c9a0', passage: '#d9d2c3', balcony: '#b6dfa0', garden: '#7fc97f', open: '#9fd8d0',
   parking: '#c9c9d6', yard: '#cfe6b8', stair: '#c49a6c', room: '#dcdcdc', duct: '#999', dress: '#e3d2b8' };
+// room.floor: material names in blender/lib.py (server.py FINISHES checks them); no value = by room type
+const FINISH = { '': 'Auto (by room type)', marble: 'Marble', wood: 'Wood', tile: 'Tiles', bathtile: 'Bathroom tiles',
+  terracotta: 'Terracotta', concrete: 'Concrete' };
+const WALL = '#efe7da';      // lib.py's warm white in sRGB: choosing it drops plan.wall_color, so the build is as before
 const D = 100 / 72;          // page image px per PDF point
 let plan, fi = 0, sel = null, tool = 'select', img = {}, history = [];
 let view = { k: 10, ox: 40, oy: 600 };
@@ -133,7 +137,7 @@ function drawFloor(f, dx, dy, active) {
     if ((r[1] - r[0]) * view.k < 30) return;
     const [x, y] = toC((r[0] + r[1]) / 2, (r[2] + r[3]) / 2);
     g.fillStyle = '#111';
-    g.fillText(z.type, x, y);
+    g.fillText(z.floor ? `${z.type} · ${(FINISH[z.floor] || z.floor).toLowerCase()}` : z.type, x, y);
   });
   g.globalAlpha = 1;
 }
@@ -162,6 +166,8 @@ function ui() {
   document.querySelectorAll('#tabs button').forEach((b, i) => b.classList.toggle('on', i === fi));
   const f = F();
   $('fname').value = f.name;
+  $('wc').value = plan.wall_color || WALL;
+  document.querySelectorAll('#paint .sw').forEach((b) => b.classList.toggle('on', b.dataset.c === $('wc').value));
   const src = f.scale_source || plan.scale_source;
   $('scale').textContent = `${plan.floors.length} floor${plan.floors.length > 1 ? 's' : ''} · scale ${src === 'labels'
     ? 'read from room sizes' : src === 'user' ? 'set by you' : 'GUESSED - use Set scale'}`;
@@ -186,9 +192,12 @@ function ui() {
     const z = f.rooms[sel.i];
     h.innerHTML = `<h3>Room</h3><div class="row"><span>Type</span><select id="rt">${TYPES.map((t) => `<option>${t}</option>`).join('')}</select></div>
       <div class="row" style="margin-top:6px"><span>Label</span><input type="text" id="rl" style="width:160px"></div>
+      <div class="row" style="margin-top:6px"><span>Floor finish</span><select id="rf">${Object.entries(FINISH)
+        .map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></div>
       <p class="muted" style="font-size:12px">${+z.area} sq ft. Furniture follows the type.</p>`;
     P.appendChild(h);
     $('rt').value = z.type; $('rt').onchange = (e) => { snapshot(); z.type = e.target.value; draw(); };
+    $('rf').value = z.floor || ''; $('rf').onchange = (e) => { snapshot(); if (e.target.value) z.floor = e.target.value; else delete z.floor; draw(); };
     $('rl').value = z.label || ''; $('rl').oninput = (e) => { z.label = e.target.value; };
   } else if (sel.kind === 'stair') {
     h.innerHTML = '<h3>Stair flight</h3>';
@@ -202,6 +211,9 @@ function ui() {
   draw();
 }
 $('fname').oninput = (e) => { F().name = e.target.value; document.querySelectorAll('#tabs button')[fi].textContent = e.target.value; };
+function paint(c) { if ((plan.wall_color || WALL) === c) return; snapshot(); if (c === WALL) delete plan.wall_color; else plan.wall_color = c; ui(); }
+document.querySelectorAll('#paint .sw').forEach((b) => { b.style.background = b.dataset.c; b.onclick = () => paint(b.dataset.c); });
+$('wc').onchange = (e) => paint(e.target.value);
 $('fh').onchange = (e) => { plan.floor_height = Math.max(8, Math.min(14, +e.target.value || 10)); };
 
 // ---------------------------------------------------------------- tools

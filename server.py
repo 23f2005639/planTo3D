@@ -22,6 +22,7 @@ os.makedirs(JOBS, exist_ok=True)
 builds = queue.Queue()
 lock = threading.RLock()        # reentrant: request handlers hold it around status() to check and set a stage in one step
 BUSY = ("uploaded", "detecting", "queued", "building")
+FINISHES = ("marble", "wood", "tile", "bathtile", "terracotta", "concrete")     # room.floor: blender/lib.py materials, as in edit.js FINISH
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
          ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".glb": "model/gltf-binary",
          ".wasm": "application/wasm", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".hdr": "application/octet-stream",
@@ -393,6 +394,14 @@ class H(BaseHTTPRequestHandler):
                     if what == "plan":
                         if not isinstance(req.get("floors"), list) or not req["floors"]:
                             return self.send(400, {"error": "invalid plan"})
+                        # both go to Blender as material names / colours: only values it knows
+                        rooms = [z for f in req["floors"] if isinstance(f, dict) and isinstance(f.get("rooms"), list)
+                                 for z in f["rooms"] if isinstance(z, dict)]
+                        if any("floor" in z and z["floor"] not in FINISHES for z in rooms):
+                            return self.send(400, {"error": "Unknown floor finish."})
+                        wall = req.get("wall_color")
+                        if "wall_color" in req and not (isinstance(wall, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", wall)):
+                            return self.send(400, {"error": "Wall colour must look like #rrggbb."})
                         with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
                             json.dump(req, fh)
                         return self.send(200, {"ok": True})
