@@ -523,8 +523,7 @@ for k, f in enumerate(floors):
         stair_box_prev = bbox_of([b[:4] for b in sboxes])
     else:
         stair_box_prev = None
-    # furniture: none if the review page's "Furniture" box was unticked; hand-placed items win over the rules
-    items = [] if plan.get("furnish") is False else f.get("items") or furnish.furnish_floor(f)
+    items = furnish.floor_items(plan, f)
     for it in items:
         try:
             custom(it) or CALLS[it["fn"]](*it["args"], **it["kw"])

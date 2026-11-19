@@ -3,7 +3,7 @@ Standard library only. Run: python3 server.py [--port 8080] [--host 127.0.0.1] [
 Builds run one at a time in Blender (GPU) in a background thread; progress is polled by the pages.
 --cors lets pages on another site call the API from the browser (ORIGIN such as https://example.com, or *).
 There is no login: run it on a trusted network, or behind your own backend or proxy."""
-import importlib, json, os, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
+import importlib, json, math, os, queue, re, shutil, subprocess, sys, threading, time, traceback, uuid, zipfile
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, unquote
 
@@ -16,7 +16,7 @@ MAX_UPLOAD = 200 * 1024 * 1024       # plans are small; recordings sent for MP4 
 BUILD_TIMEOUT = 2 * 3600        # seconds; a high-quality build of a large house takes well under an hour
 ID = re.compile(r"^[a-f0-9]{12}$")
 sys.path.insert(0, HERE)
-import catalog, detect, fetch_assets  # noqa: E402
+import catalog, detect, fetch_assets, furnish  # noqa: E402
 
 os.makedirs(JOBS, exist_ok=True)
 builds = queue.Queue()
@@ -149,6 +149,39 @@ def furniture():
     return dict(rendering=thumbs_job["running"], items=[
         dict(fn=fn, label=label, custom=os.path.exists(os.path.join(CUSTOM, f"{fn}.glb")),
              thumb=os.path.exists(os.path.join(THUMBS, f"{fn}.png"))) for fn, (label, *_) in catalog.CATALOG.items()])
+
+
+def plan_items(jid):
+    """the furniture each floor will get: the review page's own list if it edited that floor, else the rules' choice"""
+    plan = json.load(open(os.path.join(jdir(jid), "plan.json")))
+    return dict(floors=[furnish.floor_items(plan, f) for f in plan["floors"]], catalog={fn: [label, w, d, kw] for fn, (label, w, d, kw) in catalog.CATALOG.items()})
+
+
+# items the browser may send: must match gen.CALLS (gen.py runs inside Blender, so it cannot be imported here),
+# minus "model", whose argument is an asset file name
+ITEM_FNS = set(catalog.CATALOG) | {"shower2", "geyser", "kitchen_run", "chimney", "wall_cab2", "rug", "car",
+                                   "outdoor_set", "bathtub", "round_rug"}
+WORD = re.compile(r"[\w+-]{0,24}")       # side names such as "-x" and material names; nothing that can be a path
+
+
+def check_items(plan):
+    """furniture lists from the browser go to Blender as function arguments: only known items, plain values"""
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+    plain = lambda v: v is None or isinstance(v, bool) or num(v) or (isinstance(v, str) and WORD.fullmatch(v))
+    for f in plan["floors"]:
+        if not isinstance(f, dict) or "items" not in f:
+            continue
+        items = f["items"]
+        if not isinstance(items, list) or len(items) > 400:
+            raise ValueError("invalid furniture list")
+        for it in items:
+            if not (isinstance(it, dict) and isinstance(it.get("fn"), str) and it["fn"] in ITEM_FNS
+                    and isinstance(it.get("args"), list) and len(it["args"]) <= 8 and all(num(v) or isinstance(v, str) and WORD.fullmatch(v) for v in it["args"])
+                    and isinstance(it.get("box"), list) and len(it["box"]) == 4 and all(map(num, it["box"]))
+                    and isinstance(it.get("kw"), dict) and len(it["kw"]) <= 12
+                    and all(WORD.fullmatch(k) and plain(v) for k, v in it["kw"].items())
+                    and isinstance(it.get("solid", True), bool) and isinstance(it.get("room", ""), str)):
+                raise ValueError("invalid furniture item")
 
 
 # ------------------------------------------------------------------ pipeline steps
@@ -297,6 +330,15 @@ class H(BaseHTTPRequestHandler):
                 left = st["started"] + st["eta_total"] - time.time()
                 st["eta_left"] = max(0, round(min(left, 15) if st.get("progress", 0) >= 92 else left))   # 92 = exporting, the last step
             return self.send(200 if st else 404, st or {"error": "no such job"})
+        m = re.match(r"^/api/jobs/([a-f0-9]{12})/furniture$", p)
+        if m:
+            if not os.path.exists(os.path.join(jdir(m.group(1)), "plan.json")):
+                return self.send(404, {"error": "no plan yet"})
+            try:
+                return self.send(200, plan_items(m.group(1)))
+            except Exception:
+                traceback.print_exc()
+                return self.send(500, {"error": "The furniture could not be worked out - see the server log."})
         if p == "/api/system":
             return self.send(200, system())
         if p == "/api/jobs":
@@ -393,6 +435,7 @@ class H(BaseHTTPRequestHandler):
                     if what == "plan":
                         if not isinstance(req.get("floors"), list) or not req["floors"]:
                             return self.send(400, {"error": "invalid plan"})
+                        check_items(req)
                         with open(os.path.join(jdir(jid), "plan.json"), "w") as fh:
                             json.dump(req, fh)
                         return self.send(200, {"ok": True})

@@ -85,6 +85,7 @@ python server.py
 |---|---|
 | **Review before building** | Detected walls, doors, windows and rooms drawn over your PDF. Click to change or delete, draw walls, add doors and windows, set the scale |
 | **Furniture on or off** | Untick **Furniture** for empty rooms |
+| **Move your furniture** | The **Furniture** tool on the review page shows each item: drag to move, turn it 90°, delete it, or add one from the list |
 | **Time estimate** | The build box shows about how long is left, learned from earlier builds on the same machine |
 | **Walkthrough** | W A S D and mouse on desktop, two thumbs on a phone. Starts at the entrance side of the plan |
 | **Top view** (T) | The house from above, one storey at a time |
@@ -157,7 +158,8 @@ sequenceDiagram
 | `POST /api/upload` | Body: the PDF. Header `X-Filename`. Returns `{ id }` and starts detection |
 | `GET /api/jobs/{id}` | `{ stage, progress, message, floors, eta_left }`. Stages: `detecting`, `detected`, `queued`, `building`, `done`, `failed` |
 | `GET /jobs/{id}/plan.json` | The detected plan (feet): walls, openings, rooms, stairs per storey |
-| `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms |
+| `POST /api/jobs/{id}/plan` | Save an edited plan. `"furnish": false` builds empty rooms. A floor's `items` list (furniture placed on the review page) replaces the rules for that floor |
+| `GET /api/jobs/{id}/furniture` | `{ floors, catalog }`: each floor's furniture items (its own `items`, else the rules' choice) and the items that can be added |
 | `POST /api/jobs/{id}/build` | Body `{ "quality": "draft" \| "high" }`. Builds run one at a time |
 | `POST /api/jobs/{id}/export` | Packs the Blender file. Returns `{ url }` of the zip |
 | `GET /web/view.html?job={id}` | The walkthrough. `&embed` hides the link back to the upload page |
