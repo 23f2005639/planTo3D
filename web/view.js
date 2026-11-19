@@ -91,29 +91,33 @@ function roomAt(lv, x, y) {
 // ---- player
 const p = { ...walk.entrance(meta), z: floors[0].z, yaw: 0, pitch: 0 };
 const keys = {};
-let locked = false, topView = false;
+let locked = false, topView = false, measuring = false;
 addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (e.code === 'KeyT') toggleTop();
   if (e.code === 'KeyP' && !e.repeat) screenshot();
   if (e.code === 'KeyR' && !e.repeat) toggleRec();
   if (e.code === 'KeyM' && !e.repeat) toggleMap();
+  if (e.code === 'KeyN' && !e.repeat) setMeasure(!measuring);
+  if (e.code === 'Escape' && measuring) setMeasure(false);
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });      // a key let go in another window never sends keyup here
 const canvas = renderer.domElement;
+// back to walking: capture the mouse again, or looking around stays dead with nothing to click
+const capture = () => { if (!matchMedia('(pointer: coarse)').matches) canvas.requestPointerLock()?.catch?.(() => { if (!topView && !measuring) $('overlay').style.display = 'flex'; }); };
 $('overlay').addEventListener('click', () => {
   if (matchMedia('(pointer: coarse)').matches) { $('overlay').style.display = 'none'; return; }
   canvas.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
-  $('overlay').style.display = locked || topView ? 'none' : 'flex';
+  $('overlay').style.display = locked || topView || measuring ? 'none' : 'flex';
 });
 // the browser refused to capture the mouse: show the start screen, whose click captures it
-document.addEventListener('pointerlockerror', () => { if (!topView) $('overlay').style.display = 'flex'; });
+document.addEventListener('pointerlockerror', () => { if (!topView && !measuring) $('overlay').style.display = 'flex'; });
 addEventListener('mousemove', (e) => {
-  if (!locked) return;
+  if (!locked && !(measuring && !topView && e.buttons)) return;      // measuring frees the mouse: drag to look instead
   p.yaw -= e.movementX * 0.0022;
   p.pitch = Math.max(-1.4, Math.min(1.4, p.pitch - e.movementY * 0.0022));
 });
@@ -169,8 +173,7 @@ function toggleTop() {
   } else {
     orbit.enabled = false;
     showLevels(levels.length);
-    // back to walking: capture the mouse again, or looking around stays dead with nothing to click
-    if (!matchMedia('(pointer: coarse)').matches) canvas.requestPointerLock()?.catch?.(() => { $('overlay').style.display = 'flex'; });
+    if (!measuring) capture();
   }
   map.style.display = topView ? 'none' : 'block';
   $('cross').style.display = topView ? 'none' : 'block';
@@ -188,6 +191,64 @@ floors.forEach((f, i) => {
     if (r) { p.x = (r[0] + r[1]) / 2; p.y = (r[2] + r[3]) / 2; p.z = f.z; }
   };
   $('floors').appendChild(b);
+});
+
+// ---- tape measure (N): click or tap two points on the house. Line, ends and label are part of the 3D scene,
+// so a screenshot or video taken while measuring shows the measurement too.
+let tapeN = 0, downAt = null;
+const ray = new THREE.Raycaster();
+const ink = { color: 0xffd23f, depthTest: false, fog: false, toneMapped: false, transparent: true };   // seen through walls and furniture
+const tapeGeo = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(6, 3));
+const tapeCv = Object.assign(document.createElement('canvas'), { width: 512, height: 96 });
+const tapeTex = new THREE.CanvasTexture(tapeCv);
+tapeTex.colorSpace = THREE.SRGBColorSpace;
+const tapeLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: tapeTex, depthTest: false, fog: false, toneMapped: false, sizeAttenuation: false }));
+tapeLabel.scale.set(0.24, 0.045, 1);      // a fixed size on screen, near or far
+tapeLabel.center.set(0.5, -0.15);         // just above the line
+const tape = new THREE.Group().add(new THREE.Line(tapeGeo, new THREE.LineBasicMaterial(ink)),
+  new THREE.Points(tapeGeo, new THREE.PointsMaterial({ ...ink, size: 7, sizeAttenuation: false })), tapeLabel);
+tape.children.forEach((o) => { o.renderOrder = 10; o.frustumCulled = false; });     // the points move: a cached bounding sphere would go stale
+tape.visible = false;
+scene.add(tape);
+function setMeasure(on) {
+  measuring = on;
+  tapeN = 0;
+  tape.visible = false;
+  $('measure').classList.toggle('on', on);
+  document.body.classList.toggle('measure', on);
+  if (on) { document.exitPointerLock?.(); $('overlay').style.display = 'none'; }     // the mouse must be free to point
+  else if (!topView) capture();
+}
+$('measure').onclick = () => setMeasure(!measuring);
+canvas.addEventListener('pointerdown', (e) => { if (e.isPrimary) downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('click', (e) => {
+  // orbiting (top view) and looking (touch) end in a click too: only a click that did not drag measures
+  if (!measuring || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, 1 - e.clientY / innerHeight * 2), camera);
+  const hit = ray.intersectObject(gltf.scene, true).find((h) => h.object.visible && !h.object.material.transparent);     // the ray also meets hidden storeys and window glass
+  if (!hit) return;
+  if (tapeN === 2) tapeN = 0;                      // a third click starts a new measurement
+  const pos = tapeGeo.attributes.position;
+  pos.setXYZ(tapeN++, hit.point.x, hit.point.y, hit.point.z);
+  pos.needsUpdate = true;
+  tapeGeo.setDrawRange(0, tapeN);
+  tape.visible = true;
+  tapeLabel.visible = tapeN === 2;
+  if (tapeN < 2) return;
+  const a = new THREE.Vector3().fromBufferAttribute(pos, 0), b = new THREE.Vector3().fromBufferAttribute(pos, 1);
+  const d = a.distanceTo(b), inch = Math.round(d / 0.0254);
+  tapeLabel.position.lerpVectors(a, b, 0.5);
+  const g = tapeCv.getContext('2d'), text = `${d.toFixed(2)} m · ${Math.floor(inch / 12)}' ${inch % 12}"`;
+  g.clearRect(0, 0, 512, 96);
+  g.font = '600 52px system-ui, sans-serif';
+  g.font = `600 ${Math.floor(52 * Math.min(1, 440 / g.measureText(text).width))}px system-ui, sans-serif`;     // long readings shrink to fit
+  const tw = g.measureText(text).width + 40;
+  g.fillStyle = 'rgba(14, 16, 20, .82)';
+  g.beginPath(); g.roundRect(256 - tw / 2, 8, tw, 80, 40); g.fill();
+  g.fillStyle = '#ffd23f'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 256, 50);
+  tapeTex.needsUpdate = true;
+  window.__tape = text;                            // read by tests/test_site.mjs
 });
 
 // ---- map (M): the storey you are on from above, with room names, stairs, and where you stand and look
@@ -222,10 +283,14 @@ function drawMap(lv) {
   mg.textAlign = 'center';
   mg.textBaseline = 'middle';
   mg.fillStyle = '#fff';
-  for (const r of f.rooms) {            // a name is drawn only where it fits inside its room
+  for (const r of f.rooms) {            // a name (and on the big map its size) is drawn only where it fits inside its room
     const q = r.rects.reduce((a, b) => ((b[1] - b[0]) * (b[3] - b[2]) > (a[1] - a[0]) * (a[3] - a[2]) ? b : a));
-    const name = roomName(r);
-    if (mg.measureText(name).width < (q[1] - q[0]) * k - 2 && size < (q[3] - q[2]) * k - 2) mg.fillText(name, X((q[0] + q[1]) / 2), Y((q[2] + q[3]) / 2));
+    const lines = [roomName(r)], area = r.rects.reduce((s, c) => s + (c[1] - c[0]) * (c[3] - c[2]), 0);
+    if (mapBig) lines.push(`${(q[1] - q[0]).toFixed(2)} × ${(q[3] - q[2]).toFixed(2)} m`, `${area.toFixed(1)} m² · ${Math.round(area / 0.09290304)} sq ft`);
+    const fits = (n) => size * (1.3 * n - 0.3) < (q[3] - q[2]) * k - 2 && lines.slice(0, n).every((t) => mg.measureText(t).width < (q[1] - q[0]) * k - 2);
+    let n = lines.length;
+    while (n && !fits(n)) n--;
+    for (let i = 0; i < n; i++) mg.fillText(lines[i], X((q[0] + q[1]) / 2), Y((q[2] + q[3]) / 2) + (i - (n - 1) / 2) * size * 1.3);
   }
   // you: a view cone and a dot (yaw 0 looks along plan +y, turning left is positive)
   const px = X(p.x), py = Y(p.y), a = -Math.PI / 2 - p.yaw, len = mapBig ? 70 : 30;
