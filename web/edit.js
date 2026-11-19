@@ -104,6 +104,80 @@ function wallT() {
 }
 function snapshot() { history.push(JSON.stringify(plan)); if (history.length > 50) history.shift(); }
 
+// ---------------------------------------------------------------- furniture (feet; rot 0 = front faces -y, 90 = +x)
+let auto = null, cat = {};     // the rules' items per floor (from the server), the catalogue that can be added
+// nothing to show or edit until the rules' list is in, or while furnishing is off: an edit would freeze that empty list
+const ready = () => auto && $('furn').checked;
+const items = () => (ready() ? F().items || auto[fi] || [] : []);
+// the first edit on a floor copies the rules' list into the plan: from then on the build uses exactly that list
+function own() { snapshot(); return (F().items ??= structuredClone(auto[fi] || [])); }
+// kitchen runs, wall cabinets, rugs and the hood are placed from wall coordinates: they can only be deleted
+const movable = (it) => it.args.length === 3 && it.args.every((v) => typeof v === 'number') && it.box[1] > it.box[0];
+function itemRect(it) {        // the wall cabinets and the hood have no footprint: drawn from their own coordinates
+  if (it.box[1] > it.box[0]) return it.box;
+  const a = it.args;
+  return typeof a[3] === 'number' ? a.slice(0, 4) : [a[0] - 0.6, a[0] + 0.6, a[1] - 0.6, a[1] + 0.6];
+}
+function pickItem(x, y) {      // the smallest item under the pointer: a nightstand before the rug under it
+  let best = null, area = Infinity;
+  items().forEach((it, i) => {
+    const r = itemRect(it), a = (r[1] - r[0]) * (r[3] - r[2]);
+    if (inR(r, x, y) && a < area) { best = { kind: 'item', i }; area = a; }
+  });
+  return best;
+}
+function moveItem(it, dx, dy) {
+  it.args[0] += dx; it.args[1] += dy;
+  it.box = [it.box[0] + dx, it.box[1] + dx, it.box[2] + dy, it.box[3] + dy];
+}
+function rotateItem(it) {      // a quarter turn anticlockwise about the item's point: (u, v) -> (-v, u)
+  const [x, y] = it.args, [x0, x1, y0, y1] = it.box;
+  it.box = [x - (y1 - y), x - (y0 - y), y + (x0 - x), y + (x1 - x)];
+  it.args[2] = (it.args[2] + 90) % 360;
+}
+async function loadFurniture() {
+  // saved first, so the rules see the room types as they are now (refused while a build runs: the saved plan is used)
+  auto = null; sel = null;
+  plan.furnish = $('furn').checked;
+  try {
+    await fetch(`/api/jobs/${job}/plan`, { method: 'POST', body: JSON.stringify(plan) });
+    const r = await fetch(`/api/jobs/${job}/furniture`);
+    if (r.ok) ({ floors: auto, catalog: cat } = await r.json());
+  } catch { /* shown below */ }
+  if (!auto) $('hint').textContent = 'The furniture could not be loaded. Choose the Furniture tool again to retry.';
+  ui();
+}
+function drawItems() {
+  items().forEach((it, i) => {
+    const B = itemRect(it), [X, Y, W, Hh] = rectC(B), on = sel?.kind === 'item' && sel.i === i;
+    g.fillStyle = on ? 'rgba(176,86,43,.45)' : 'rgba(40,40,40,.16)'; g.fillRect(X, Y, W, Hh);
+    g.strokeStyle = on ? '#b0562b' : '#333'; g.strokeRect(X, Y, W, Hh);
+    if (movable(it)) {         // a thick line along the front edge, so a turn shows
+      const k = ((Math.round(it.args[2] / 90) % 4) + 4) % 4;
+      const e = [[B[0], B[2], B[1], B[2]], [B[1], B[2], B[1], B[3]], [B[0], B[3], B[1], B[3]], [B[0], B[2], B[0], B[3]]][k];
+      g.lineWidth = 3; g.beginPath(); g.moveTo(...toC(e[0], e[1])); g.lineTo(...toC(e[2], e[3])); g.stroke(); g.lineWidth = 1;
+    }
+    if (W > 30) { g.fillStyle = '#111'; g.font = '11px system-ui'; g.textAlign = 'center'; g.fillText(it.fn, X + W / 2, Y + Hh / 2 + 4); }
+  });
+}
+function addBox() {            // a catalogue item in the middle of the view, its front facing -y; then drag it into place
+  const s = document.createElement('select');
+  s.style.width = '100%';
+  s.add(new Option('Add furniture…', ''));
+  for (const [fn, [label]] of Object.entries(cat)) s.add(new Option(label, fn));
+  s.onchange = () => {
+    const [, w, d, kw] = cat[s.value], [x, y] = toP(cv.clientWidth / 2, cv.clientHeight / 2);
+    own().push({ fn: s.value, args: [x, y, 0], kw: { ...kw }, box: [x - w / 2, x + w / 2, y - d / 2, y + d / 2], solid: true, room: '' });
+    sel = { kind: 'item', i: items().length - 1 }; ui();
+  };
+  return s;
+}
+function removeSel() {
+  if (sel.kind === 'item') own().splice(sel.i, 1);
+  else { snapshot(); F()[{ wall: 'walls', opening: 'openings', stair: 'stairs' }[sel.kind]].splice(sel.i, 1); }
+  sel = null; ui();
+}
+
 // ---------------------------------------------------------------- drawing
 function rectC(r) { const [a, b] = toC(r[0], r[3]), [c, d] = toC(r[1], r[2]); return [a, b, c - a, d - b]; }
 // floor j's plan coordinates -> the current floor's (both are measured from their own lower-left corner)
@@ -157,6 +231,7 @@ function draw() {
   // the other plans on this sheet stay visible (faded); click one to edit it
   plan.floors.forEach((o, j) => { if (j !== fi && (o.page || 1) === (f.page || 1)) drawFloor(o, ...offsetOf(j), false); });
   drawFloor(f, 0, 0, true);
+  if (tool === 'furniture') drawItems();
   if (drag?.preview) { g.strokeStyle = '#000'; g.setLineDash([4, 3]); g.strokeRect(...rectC(drag.preview)); g.setLineDash([]); }
   for (const p of scalePts) { const [x, y] = toC(...p); g.fillStyle = '#b0562b'; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); }
 }
@@ -173,9 +248,14 @@ function ui() {
     ? 'read from room sizes' : src === 'user' ? 'set by you' : 'GUESSED - use Set scale'}`;
   const P = $('props');
   P.innerHTML = '';
+  if (!sel && tool === 'furniture') {
+    P.innerHTML = `<h3>Furniture</h3><p class="muted" style="font-size:13px">${!$('furn').checked
+      ? 'Furnish the rooms is off: the house is built empty' : auto ? `${items().length} items on this floor` : 'Loading…'}</p>`;
+    if (ready()) P.appendChild(addBox());
+    draw(); return;
+  }
   if (!sel) { P.innerHTML = `<h3>Selection</h3><p class="muted" style="font-size:13px">${f.walls.length} walls, ${f.openings.length} openings, ${f.rooms.length} rooms</p>`; draw(); return; }
   const h = document.createElement('div');
-  const del = () => { snapshot(); f[{ wall: 'walls', opening: 'openings', stair: 'stairs' }[sel.kind]].splice(sel.i, 1); sel = null; ui(); };
   if (sel.kind === 'wall') {
     const w = f.walls[sel.i];
     h.innerHTML = `<h3>Wall</h3><div class="row"><span>${(Math.max(w[1] - w[0], w[3] - w[2])).toFixed(1)} ft long</span>
@@ -202,12 +282,25 @@ function ui() {
   } else if (sel.kind === 'stair') {
     h.innerHTML = '<h3>Stair flight</h3>';
     P.appendChild(h);
+  } else if (sel.kind === 'item') {
+    const it = items()[sel.i];
+    h.innerHTML = '<h3>Furniture</h3><p class="muted" style="font-size:13px"></p>';
+    h.querySelector('p').textContent = [cat[it.fn]?.[0] || it.fn, it.room, movable(it) ? '' : 'Fixed to the wall: delete only']
+      .filter(Boolean).join(' · ');
+    P.appendChild(h);
+    if (movable(it)) {
+      const b = document.createElement('button');
+      b.className = 'btn ghost'; b.textContent = 'Rotate 90°'; b.style.margin = '0 8px 0 0';
+      b.onclick = () => { rotateItem(own()[sel.i]); ui(); };
+      P.appendChild(b);
+    }
   }
   if (sel.kind !== 'room') {
     const b = document.createElement('button');
-    b.className = 'btn ghost'; b.textContent = 'Delete'; b.style.marginTop = '8px'; b.onclick = del;
+    b.className = 'btn ghost'; b.textContent = 'Delete'; b.style.marginTop = '8px'; b.onclick = removeSel;
     P.appendChild(b);
   }
+  if (tool === 'furniture' && ready()) P.appendChild(addBox());
   draw();
 }
 $('fname').oninput = (e) => { F().name = e.target.value; document.querySelectorAll('#tabs button')[fi].textContent = e.target.value; };
@@ -223,20 +316,21 @@ const HINT = {
   door: 'Click on a wall where the door should be (3 ft wide).',
   window: 'Click on a wall where the window should be (4 ft wide).',
   scale: 'Click two points a known distance apart, then type that distance.',
+  furniture: 'Drag furniture to move it, click it to turn or delete it, add more from the list. Drag elsewhere to pan.',
 };
 let scalePts = [];
 document.querySelectorAll('#tools button[data-t]').forEach((b) => b.onclick = () => {
-  tool = b.dataset.t; scalePts = [];
+  tool = b.dataset.t; scalePts = []; sel = null;
   document.querySelectorAll('#tools button[data-t]').forEach((x) => x.classList.toggle('on', x === b));
   $('hint').textContent = HINT[tool];
-  draw();
+  if (tool === 'furniture') loadFurniture();
+  ui();
 });
+$('furn').onchange = () => { if (tool === 'furniture') loadFurniture(); };
 $('undo').onclick = () => { if (history.length) { plan = JSON.parse(history.pop()); sel = null; ui(); } };
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if ((e.key === 'Delete' || e.key === 'Backspace') && sel && sel.kind !== 'room') {
-    snapshot(); F()[{ wall: 'walls', opening: 'openings', stair: 'stairs' }[sel.kind]].splice(sel.i, 1); sel = null; ui();
-  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && sel && sel.kind !== 'room') removeSel();
   if (e.key === 'z' && (e.ctrlKey || e.metaKey)) $('undo').onclick();
 });
 
@@ -266,6 +360,7 @@ function rescale(k) {
     (f.stairs || []).forEach((s) => { R(s.rect); s.words = s.words.map(([t, x, y]) => [t, x * k, y * k]); });
     (f.labels || []).forEach((l) => { l.at = l.at.map((v) => v * k); });
     f.size = f.size.map((v) => v * k);
+    delete f.items;            // hand-placed furniture no longer matches the drawing: the rules place it again
     f.scale_pt_per_ft = scaleOf(f) / k;
     f.scale_source = 'user';
   }
@@ -276,12 +371,24 @@ cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const [x, y] = toP(e.offsetX, e.offsetY);
   drag = { X: e.offsetX, Y: e.offsetY, x, y, moved: false };
+  if (tool === 'furniture') {
+    sel = pickItem(x, y);
+    drag.item = sel && movable(items()[sel.i]);
+    ui();
+  }
 });
 cv.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const dx = e.offsetX - drag.X, dy = e.offsetY - drag.Y;
   if (Math.hypot(dx, dy) > 4) drag.moved = true;
-  if (tool === 'select' && drag.moved) { view.ox += e.movementX; view.oy += e.movementY; draw(); }
+  if ((tool === 'select' || tool === 'furniture' && !drag.item) && drag.moved) { view.ox += e.movementX; view.oy += e.movementY; draw(); }
+  if (tool === 'furniture' && drag.item && drag.moved) {
+    const [x, y] = toP(e.offsetX, e.offsetY), list = drag.owned ? F().items : own();     // one undo step per drag
+    drag.owned = true;
+    moveItem(list[sel.i], x - drag.x, y - drag.y);
+    drag.x = x; drag.y = y;
+    draw();
+  }
   if (tool === 'wall' && drag.moved) {
     const [x, y] = toP(e.offsetX, e.offsetY), t = wallT() / 2;
     drag.preview = Math.abs(x - drag.x) > Math.abs(y - drag.y)
@@ -319,7 +426,9 @@ cv.addEventListener('pointerup', (e) => {
       const meas = Math.hypot(scalePts[1][0] - scalePts[0][0], scalePts[1][1] - scalePts[0][1]);
       const real = parseFeet(prompt(`Measured ${meas.toFixed(2)} ft on the drawing. Real distance (e.g. 12'6")?`, meas.toFixed(1)));
       scalePts = [];
-      if (real > 0 && meas > 0) { rescale(real / meas); fit(); ui(); } else draw();
+      const ok = real > 0 && meas > 0 && (!plan.floors.some((o) => o.items)
+        || confirm('The furniture you placed will be placed again by the rules at the new scale. Go on?'));
+      if (ok) { rescale(real / meas); fit(); ui(); } else draw();
     }
   }
 });
